@@ -3,10 +3,9 @@ import {
   HeartHandshake,
   ImagePlus,
   MapPinned,
-  MessageCircle,
-  UsersRound,
 } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   Pressable,
@@ -17,47 +16,42 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppDock } from '../components/AppDock';
 import {
   ambientBtn,
   ambientCard,
   colors,
   containerMargin,
-  dockPaddingBottom,
-  dockPaddingTop,
-  dockShadowUp,
   fontFamily,
+  getDockOuterHeight,
   lineHeight,
   radii,
   spacing,
   typeScale,
 } from '../theme';
 
-type DockTabId = 'protect' | 'map' | 'circles' | 'chat';
-
-const DOCK: { id: DockTabId; label: string; icon: typeof HeartHandshake }[] = [
-  { id: 'protect', label: 'Protect', icon: HeartHandshake },
-  { id: 'map', label: 'Map', icon: MapPinned },
-  { id: 'circles', label: 'Circles', icon: UsersRound },
-  { id: 'chat', label: 'Chat', icon: MessageCircle },
-];
-
 const tertiaryFieldBg = 'rgba(227, 225, 238, 0.3)';
 
 export default function HomeScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const [firstName, setFirstName] = useState('');
   const [city, setCity] = useState('');
   const [nameFocused, setNameFocused] = useState(false);
   const [cityFocused, setCityFocused] = useState(false);
 
-  const dockInsetBottom = Math.max(insets.bottom, spacing.sm);
-  const dockHeight =
-    dockPaddingTop + 52 + dockPaddingBottom + dockInsetBottom;
+  const dockH = getDockOuterHeight(insets.bottom);
   const topPad = insets.top + spacing.md;
 
   const onVerify = useCallback(() => {
-    console.log('verify profile', { firstName, city });
-  }, [firstName, city]);
+    router.push({
+      pathname: '/report',
+      params: {
+        firstName: firstName.trim() || 'Alex Mercer',
+        city: city.trim(),
+      },
+    });
+  }, [firstName, city, router]);
 
   const onUploadPress = useCallback(() => {
     console.log('upload screenshot tap');
@@ -74,7 +68,7 @@ export default function HomeScreen() {
           styles.scroll,
           {
             paddingTop: topPad,
-            paddingBottom: dockHeight + spacing.md,
+            paddingBottom: dockH + spacing.md,
             paddingHorizontal: containerMargin,
           },
         ]}
@@ -191,48 +185,7 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      <View
-        style={[
-          styles.dock,
-          dockShadowUp,
-          {
-            paddingTop: dockPaddingTop,
-            paddingBottom: dockPaddingBottom + dockInsetBottom,
-          },
-        ]}
-      >
-        {DOCK.map((tab) => {
-          const active = tab.id === 'protect';
-          const Icon = tab.icon;
-          return (
-            <Pressable
-              key={tab.id}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              onPress={() => {
-                console.log('dock', tab.id);
-              }}
-              style={({ pressed }) => [
-                styles.dockItem,
-                active && styles.dockItemActive,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Icon
-                color={active ? colors.indigo600 : colors.slate400}
-                size={22}
-                strokeWidth={2}
-              />
-              <Text
-                style={[styles.dockLabel, active && styles.dockLabelActive]}
-                numberOfLines={1}
-              >
-                {tab.label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <AppDock />
     </View>
   );
 }
@@ -395,42 +348,6 @@ const styles = StyleSheet.create({
     opacity: 0.7,
     marginTop: spacing.sm,
     paddingHorizontal: spacing.sm,
-  },
-  dock: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'flex-start',
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.white,
-    borderTopWidth: 1,
-    borderTopColor: '#f8fafc',
-    borderTopLeftRadius: radii.dockTop,
-    borderTopRightRadius: radii.dockTop,
-  },
-  dockItem: {
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.full,
-    minWidth: 0,
-    flex: 1,
-    maxWidth: 100,
-  },
-  dockItemActive: {
-    backgroundColor: colors.indigo50,
-  },
-  dockLabel: {
-    marginTop: 4,
-    fontFamily: fontFamily.medium,
-    fontSize: typeScale.dockLabel,
-    color: colors.slate400,
-  },
-  dockLabelActive: {
-    color: colors.indigo600,
   },
   pressed: {
     opacity: 0.88,

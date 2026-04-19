@@ -1,23 +1,25 @@
 import { Platform, type ViewStyle } from 'react-native';
 
-/** Header: shadow-[0_4px_20px_rgba(156,137,255,0.1)] */
+import { colors } from './colors';
+
+/** Header */
 export const headerShadow: ViewStyle = Platform.select<ViewStyle>({
   ios: {
-    shadowColor: '#9c89ff',
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.12,
     shadowRadius: 20,
   },
   android: { elevation: 4 },
   default: {},
 }) ?? {};
 
-/** `.ambient-shadow-card` — rgba(156,137,255,0.08) */
+/** `.ambient-shadow-card` */
 export const ambientCard: ViewStyle = Platform.select<ViewStyle>({
   ios: {
-    shadowColor: '#9c89ff',
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.1,
     shadowRadius: 20,
   },
   android: { elevation: 3 },
@@ -30,7 +32,7 @@ export const cardShadowSoft = ambientCard;
 /** Hero icon ring */
 export const heroIconShadow: ViewStyle = Platform.select<ViewStyle>({
   ios: {
-    shadowColor: '#9c89ff',
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 20,
@@ -39,10 +41,10 @@ export const heroIconShadow: ViewStyle = Platform.select<ViewStyle>({
   default: {},
 }) ?? {};
 
-/** `.ambient-shadow-btn` — rgba(156,137,255,0.15) */
+/** `.ambient-shadow-btn` */
 export const ambientBtn: ViewStyle = Platform.select<ViewStyle>({
   ios: {
-    shadowColor: '#9c89ff',
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.15,
     shadowRadius: 24,
@@ -63,12 +65,24 @@ export const ctaYellowShadow: ViewStyle = Platform.select<ViewStyle>({
   default: {},
 }) ?? {};
 
-/** Bottom nav — rgba(156,137,255,0.12) */
+/** Bottom nav */
+/** Map avatar / pin ring */
+export const pinGlow: ViewStyle = Platform.select<ViewStyle>({
+  ios: {
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+  },
+  android: { elevation: 8 },
+  default: {},
+}) ?? {};
+
 export const dockShadowUp: ViewStyle = Platform.select<ViewStyle>({
   ios: {
-    shadowColor: '#9c89ff',
+    shadowColor: colors.primaryContainer,
     shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.14,
     shadowRadius: 30,
   },
   android: { elevation: 10 },

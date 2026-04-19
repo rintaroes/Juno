@@ -24,6 +24,8 @@ export const colors = {
   primaryFixedDim: '#c9beff',
   primaryContainer: '#9c89ff',
   onPrimary: '#ffffff',
+  onPrimaryContainer: '#32148f',
+  secondary: '#725c00',
   secondaryContainer: '#fcd43e',
   onSecondaryContainer: '#715b00',
   /** Header / accents (Tailwind indigo) */
