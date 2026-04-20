@@ -22,11 +22,11 @@ This document is the **source of truth for technical implementation** of the cur
 
 **Not in this repo yet (typical next steps):**
 
-- Supabase (or other) auth, database, and server APIs.
+- Supabase **auth** and any **server-side** APIs (Edge Functions, webhooks, etc.); **`profiles` is not yet written from the app**.
 - Real image upload / reverse image search / background check integrations.
 - More dock routes (Circles, Chat as real screens), push notifications, subscriptions.
 
-**Current status:** UI / navigation shell / design system foundation — **no backend**, **no production data**.
+**Current status:** UI / navigation shell / design system foundation — **Supabase** hosts **`public.profiles`** (`first_name`, `city`, timestamps) for future Safety Check persistence; **RLS** allows anon `select`/`insert` **for dev smoke tests only** (replace before auth/production). Dev builds show a **Supabase** line on the home screen after the disclaimer when `profiles` is reachable.
 
 ---
 
@@ -46,6 +46,7 @@ This document is the **source of truth for technical implementation** of the cur
 | Blur | **expo-blur** (map search/sheet chrome; report **Share** modal scrim) |
 | Fonts | **expo-font** + **@expo-google-fonts/plus-jakarta-sans** (primary UI). **Fraunces** / **Inter** packages are present in `package.json` but are **not** loaded in root `_layout` today. |
 | Babel | **babel-preset-expo** + **expo-router/babel** (both declared so Metro workers resolve them) |
+| Backend (client) | **`@supabase/supabase-js`** — `lib/supabase.ts` exposes **`getSupabase()`** (lazy) for **PostgREST** over HTTPS (no separate Node API in-repo yet). Auth not wired yet. |
 
 ---
 
@@ -60,6 +61,10 @@ juno/
 │   └── report.tsx       # Route `/report` — background check result + share sheet
 ├── components/
 │   └── AppDock.tsx      # Shared bottom navigation (Protect / Map / …)
+├── lib/
+│   └── supabase.ts      # `getSupabase()` — needs EXPO_PUBLIC_SUPABASE_* in `.env` when used
+├── supabase/
+│   └── migrations/      # SQL mirrored from hosted DB migrations (e.g. `profiles`)
 ├── theme/
 │   ├── index.ts         # Re-exports all tokens
 │   ├── colors.ts        # M3-style / Aura mock palette (primary, surfaces, etc.)
@@ -91,7 +96,8 @@ juno/
 
 - **Local React state** only: `firstName`, `city`, focus flags for inputs.
 - **Verify Profile** — `router.push({ pathname: '/report', params: { firstName, city } })` (empty name falls back to demo full name in the report screen).
-- **No persistence**, **no API** — upload and non-routing dock tabs log to the console for now.
+- **Supabase (dev):** `__DEV__` runs a **`profiles` `select` limit 1** via `getSupabase()` and shows a one-line status under the disclaimer. **Rows are not written yet** from this screen — the table is empty until you add `insert`/`upsert` logic.
+- **No upload API** — upload and non-routing dock tabs log to the console for now.
 
 ### 4.3 Map screen
 
@@ -142,8 +148,11 @@ Then press `i` / `a` / scan QR for device. Use **`npx expo start -c`** if Metro 
 
 **Environment variables**
 
-- None are **required** for the current UI-only build.
-- When Supabase or other services are added, document keys here and in `.env.example` (do not commit secrets).
+- Copy **`.env.example`** → **`.env`** in the repo root (`.env` is gitignored).
+- **Expo** loads **`EXPO_PUBLIC_*`** into the JS bundle — use these for the Supabase browser/RN client.
+- **Where to get values:** Supabase Dashboard → **Project Settings** → **API**: **Project URL** → `EXPO_PUBLIC_SUPABASE_URL`; **anon public** (legacy JWT) or **publishable** key → `EXPO_PUBLIC_SUPABASE_ANON_KEY` (both work with `createClient` today).
+- **Postgres connection string** (`postgresql://…`, used by **Prisma**, scripts, or `psql`): Dashboard → **Project Settings** → **Database** → **Connection string** (URI). Prefer the **pooler** URI for serverless/tooling if you hit connection limits. **Do not** put `DATABASE_URL` in the mobile app — only in local tooling or a private server.
+- **Prisma vs Supabase-only:** For this Expo app, the “backend” is normally **Supabase Postgres + RLS + PostgREST**, accessed only via **`@supabase/supabase-js`** from the client. Add **Prisma** only if you want a **separate Node** service or migration CLI talking to Postgres over `DATABASE_URL`; it is not installed in this repo by default (avoids duplicating schema between Prisma and Supabase migrations).
 
 ---
 

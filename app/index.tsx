@@ -6,7 +6,7 @@ import {
 } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppDock } from '../components/AppDock';
+import { getSupabase } from '../lib/supabase';
 import {
   ambientBtn,
   ambientCard,
@@ -39,6 +40,9 @@ export default function HomeScreen() {
   const [city, setCity] = useState('');
   const [nameFocused, setNameFocused] = useState(false);
   const [cityFocused, setCityFocused] = useState(false);
+  const [dbCheck, setDbCheck] = useState<
+    'idle' | { ok: true } | { ok: false; message: string }
+  >('idle');
 
   const dockH = getDockOuterHeight(insets.bottom);
   const topPad = insets.top + spacing.md;
@@ -55,6 +59,32 @@ export default function HomeScreen() {
 
   const onUploadPress = useCallback(() => {
     console.log('upload screenshot tap');
+  }, []);
+
+  useEffect(() => {
+    if (!__DEV__) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { error } = await getSupabase()
+          .from('profiles')
+          .select('id')
+          .limit(1);
+        if (cancelled) return;
+        if (error) {
+          setDbCheck({ ok: false, message: error.message });
+        } else {
+          setDbCheck({ ok: true });
+        }
+      } catch (e) {
+        if (cancelled) return;
+        const message = e instanceof Error ? e.message : String(e);
+        setDbCheck({ ok: false, message });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -182,6 +212,14 @@ export default function HomeScreen() {
             Searches are completely anonymous. We never notify the person you
             are searching.
           </Text>
+
+          {__DEV__ && dbCheck !== 'idle' ? (
+            <Text style={styles.dbSmoke} accessibilityLabel="Supabase debug status">
+              {dbCheck.ok === true
+                ? 'Supabase: profiles table OK'
+                : `Supabase: ${dbCheck.message}`}
+            </Text>
+          ) : null}
         </View>
       </ScrollView>
 
@@ -347,6 +385,17 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     opacity: 0.7,
     marginTop: spacing.sm,
+    paddingHorizontal: spacing.sm,
+  },
+  dbSmoke: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelSm,
+    lineHeight: lineHeight(typeScale.labelSm, 1.35),
+    color: colors.tertiary,
+    textAlign: 'center',
+    alignSelf: 'center',
+    opacity: 0.55,
+    marginTop: spacing.xs,
     paddingHorizontal: spacing.sm,
   },
   pressed: {
