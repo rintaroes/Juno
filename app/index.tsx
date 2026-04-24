@@ -18,6 +18,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppDock } from '../components/AppDock';
 import { getSupabase } from '../lib/supabase';
+import { useAuth } from '../providers/AuthProvider';
 import {
   ambientBtn,
   ambientCard,
@@ -35,6 +36,7 @@ const tertiaryFieldBg = 'rgba(227, 225, 238, 0.3)';
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { user, signOut } = useAuth();
   const insets = useSafeAreaInsets();
   const [firstName, setFirstName] = useState('');
   const [city, setCity] = useState('');
@@ -60,6 +62,12 @@ export default function HomeScreen() {
   const onUploadPress = useCallback(() => {
     console.log('upload screenshot tap');
   }, []);
+
+  const onSignOut = useCallback(() => {
+    void signOut().catch((e) => {
+      console.log('sign out failed', e);
+    });
+  }, [signOut]);
 
   useEffect(() => {
     if (!__DEV__) return;
@@ -105,6 +113,9 @@ export default function HomeScreen() {
       >
         <View style={styles.column}>
           <Text style={styles.brand}>Juno</Text>
+          <Text style={styles.signedInAs}>
+            Signed in as {user?.email ?? 'unknown user'}
+          </Text>
 
           <Text
             accessibilityRole="header"
@@ -220,6 +231,14 @@ export default function HomeScreen() {
                 : `Supabase: ${dbCheck.message}`}
             </Text>
           ) : null}
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={onSignOut}
+            style={({ pressed }) => [styles.signOutBtn, pressed && styles.pressed]}
+          >
+            <Text style={styles.signOutLabel}>Sign out</Text>
+          </Pressable>
         </View>
       </ScrollView>
 
@@ -251,6 +270,13 @@ const styles = StyleSheet.create({
     color: colors.indigo500,
     letterSpacing: -0.35,
     marginBottom: spacing.xs,
+  },
+  signedInAs: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelSm,
+    lineHeight: lineHeight(typeScale.labelSm, 1.35),
+    color: colors.tertiary,
+    marginTop: -spacing.xs,
   },
   heroTitle: {
     fontFamily: fontFamily.bold,
@@ -397,6 +423,20 @@ const styles = StyleSheet.create({
     opacity: 0.55,
     marginTop: spacing.xs,
     paddingHorizontal: spacing.sm,
+  },
+  signOutBtn: {
+    marginTop: spacing.xs,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: radii.full,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surfaceContainerLowest,
+  },
+  signOutLabel: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelMd,
+    color: colors.onSurface,
   },
   pressed: {
     opacity: 0.88,

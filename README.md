@@ -22,11 +22,11 @@ This document is the **source of truth for technical implementation** of the cur
 
 **Not in this repo yet (typical next steps):**
 
-- Supabase **auth** and any **server-side** APIs (Edge Functions, webhooks, etc.); **`profiles` is not yet written from the app**.
+- Server-side APIs (Edge Functions, webhooks, etc.).
 - Real image upload / reverse image search / background check integrations.
 - More dock routes (Circles, Chat as real screens), push notifications, subscriptions.
 
-**Current status:** UI / navigation shell / design system foundation — **Supabase** hosts **`public.profiles`** (`first_name`, `city`, timestamps) for future Safety Check persistence; **RLS** allows anon `select`/`insert` **for dev smoke tests only** (replace before auth/production). Dev builds show a **Supabase** line on the home screen after the disclaimer when `profiles` is reachable.
+**Current status:** UI / navigation shell / design system foundation + **Phase 0 auth foundation** — app includes Supabase email/password auth, session persistence, protected route gating, and typed Supabase helpers. **`public.profiles`** is now user-scoped via RLS (`auth.uid() = id`) and app auth bootstrap upserts the signed-in user's profile row.
 
 ---
 
@@ -46,7 +46,7 @@ This document is the **source of truth for technical implementation** of the cur
 | Blur | **expo-blur** (map search/sheet chrome; report **Share** modal scrim) |
 | Fonts | **expo-font** + **@expo-google-fonts/plus-jakarta-sans** (primary UI). **Fraunces** / **Inter** packages are present in `package.json` but are **not** loaded in root `_layout` today. |
 | Babel | **babel-preset-expo** + **expo-router/babel** (both declared so Metro workers resolve them) |
-| Backend (client) | **`@supabase/supabase-js`** — `lib/supabase.ts` exposes **`getSupabase()`** (lazy) for **PostgREST** over HTTPS (no separate Node API in-repo yet). Auth not wired yet. |
+| Backend (client) | **`@supabase/supabase-js`** + **`@react-native-async-storage/async-storage`** — typed `lib/supabase.ts` with RN auth session persistence for PostgREST/Auth over HTTPS. |
 
 ---
 
@@ -55,14 +55,20 @@ This document is the **source of truth for technical implementation** of the cur
 ```
 juno/
 ├── app/
-│   ├── _layout.tsx      # Root layout: fonts, splash, SafeAreaProvider, Stack (no header, animation: none)
-│   ├── index.tsx        # Route `/` — Safety Check home UI
+│   ├── _layout.tsx      # Root layout: fonts, splash, SafeAreaProvider, AuthProvider, route guard
+│   ├── auth.tsx         # Route `/auth` — email/password auth (sign in + sign up)
+│   ├── index.tsx        # Route `/` — Safety Check home UI (protected)
 │   ├── map.tsx          # Route `/map` — family map UI (map + sheet + search)
 │   └── report.tsx       # Route `/report` — background check result + share sheet
 ├── components/
-│   └── AppDock.tsx      # Shared bottom navigation (Protect / Map / …)
+│   ├── AppDock.tsx      # Shared bottom navigation (Protect / Map / …)
+│   ├── AppErrorState.tsx # App-wide error UI
+│   └── AppLoading.tsx   # App-wide loading UI
 ├── lib/
-│   └── supabase.ts      # `getSupabase()` — needs EXPO_PUBLIC_SUPABASE_* in `.env` when used
+│   ├── database.types.ts # Generated Supabase DB types
+│   └── supabase.ts      # Typed `getSupabase()` + profile upsert helper
+├── providers/
+│   └── AuthProvider.tsx # Session handling + auth state listener
 ├── supabase/
 │   └── migrations/      # SQL mirrored from hosted DB migrations (e.g. `profiles`)
 ├── theme/
@@ -89,14 +95,14 @@ juno/
 ### 4.1 Entry & navigation
 
 1. **`package.json`** `"main": "expo-router/entry"` boots the router.
-2. **`app/_layout.tsx`** loads fonts, keeps native splash until fonts resolve (or error), then wraps the app in **`SafeAreaProvider`** and a **headerless `Stack`** with **`animation: 'none'`** so dock switches between `/` and `/map` do not use a horizontal slide.
+2. **`app/_layout.tsx`** loads fonts, keeps native splash until fonts resolve (or error), then wraps the app in **`SafeAreaProvider`** + **`AuthProvider`**. A root route guard redirects signed-out users to `/auth`, redirects signed-in users away from `/auth`, and renders app-level loading/error states.
 3. **`app/index.tsx`** is the **default route** `/` (home); **`app/map.tsx`** is **`/map`**; **`app/report.tsx`** is **`/report`**.
 
 ### 4.2 State on the home screen
 
 - **Local React state** only: `firstName`, `city`, focus flags for inputs.
 - **Verify Profile** — `router.push({ pathname: '/report', params: { firstName, city } })` (empty name falls back to demo full name in the report screen).
-- **Supabase (dev):** `__DEV__` runs a **`profiles` `select` limit 1** via `getSupabase()` and shows a one-line status under the disclaimer. **Rows are not written yet** from this screen — the table is empty until you add `insert`/`upsert` logic.
+- **Supabase:** auth sessions persist in RN storage; auth state is watched with `onAuthStateChange`; signed-in users are upserted into `profiles` by `id`.
 - **No upload API** — upload and non-routing dock tabs log to the console for now.
 
 ### 4.3 Map screen
@@ -121,6 +127,7 @@ juno/
 
 | Path | File | Purpose |
 |------|------|---------|
+| `/auth` | `app/auth.tsx` | Email/password auth (sign in + sign up) |
 | `/` | `app/index.tsx` | Safety Check home (upload + fields + verify → report) |
 | `/map` | `app/map.tsx` | Circle / family map (demo map + sheet + search) |
 | `/report` | `app/report.tsx` | Background check result + share-with-circle sheet |
@@ -164,6 +171,7 @@ Then press `i` / `a` / scan QR for device. Use **`npx expo start -c`** if Metro 
 | `npm run android` | `expo start --android` |
 | `npm run ios` | `expo start --ios` |
 | `npm run web` | `expo start --web` |
+| `npm run typecheck` | `tsc --noEmit` |
 
 Optional locally:
 
@@ -185,7 +193,7 @@ npx tsc --noEmit
 
 ## 9) Known Gaps and Planned Work
 
-1. **Backend & auth** — Supabase (or other) client, session, RLS-backed tables, etc.
+1. **Backend APIs** — Edge Functions, webhooks, and server-side integrations.
 2. **Safety Check** — Wire upload to **expo-image-picker** (or document picker), then API; real verify → report pipeline.
 3. **Navigation** — Implement dock routes (Circles, Chat) as real screens or stacks; replace `console.log` stubs.
 4. **Product flows** — Date mode, live circle map data, notifications, vault/history — stubs only today.
