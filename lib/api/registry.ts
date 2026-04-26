@@ -2,6 +2,8 @@ import { getSupabase } from '../supabase';
 
 export type RegistryMatch = {
   name: string;
+  /** Display age; server prefers value computed from `dob` when DOB is present. */
+  age?: string;
   dob?: string;
   state?: string;
   zip?: string;

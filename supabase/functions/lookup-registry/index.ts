@@ -13,6 +13,7 @@ type RequestPayload = {
 
 type MatchRow = {
   name: string;
+  age?: string;
   dob?: string;
   state?: string;
   zip?: string;
@@ -93,13 +94,29 @@ function jsonResponse(status: number, body: unknown) {
   });
 }
 
-function ageFromDob(dobIso: string): number | null {
-  const d = new Date(dobIso);
-  if (Number.isNaN(d.getTime())) return null;
+/** Local calendar age; parses `YYYY-MM-DD` as civil date (not UTC `Date` string parsing). */
+function ageFromDob(dobInput: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dobInput.trim());
+  if (!match) return null;
+  const y = Number(match[1]);
+  const birthMonth = Number(match[2]);
+  const birthDay = Number(match[3]);
+  if (![y, birthMonth, birthDay].every((n) => Number.isFinite(n))) return null;
+  if (birthMonth < 1 || birthMonth > 12 || birthDay < 1 || birthDay > 31) return null;
+  const birth = new Date(y, birthMonth - 1, birthDay);
+  if (
+    birth.getFullYear() !== y ||
+    birth.getMonth() !== birthMonth - 1 ||
+    birth.getDate() !== birthDay
+  ) {
+    return null;
+  }
   const today = new Date();
-  let age = today.getFullYear() - d.getFullYear();
-  const m = today.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age -= 1;
+  const ty = today.getFullYear();
+  const tm = today.getMonth() + 1;
+  const td = today.getDate();
+  let age = ty - y;
+  if (tm < birthMonth || (tm === birthMonth && td < birthDay)) age -= 1;
   return age >= 0 && age < 130 ? age : null;
 }
 
@@ -115,6 +132,7 @@ function stubRegistryLookup(name: string): NormalizedResult {
       matches: [
         {
           name: name.trim(),
+          age: '40',
           dob: '1985-06-12',
           state: 'NY',
           zip: '10001',
@@ -170,15 +188,36 @@ async function callVendorRegistry(
     ? ((data as { offenders: Array<Record<string, unknown>> }).offenders ?? [])
     : [];
 
-  const matches: MatchRow[] = offenders.slice(0, 20).map((row) => ({
-    name: String(row.name ?? '').trim(),
-    dob: typeof row.dob === 'string' ? row.dob.slice(0, 10) : undefined,
-    state: typeof row.state === 'string' ? row.state : undefined,
-    zip: typeof row.zipcode === 'string' ? row.zipcode : undefined,
-    mugshotUrl:
-      typeof row.offenderImageUrl === 'string' ? row.offenderImageUrl : undefined,
-    sourceId: typeof row.personUuid === 'string' ? row.personUuid : undefined,
-  })).filter((m) => m.name.length > 0);
+  const matches: MatchRow[] = offenders.slice(0, 20).map((row) => {
+    let mug: string | undefined;
+    const imgRaw = row.offenderImageUrl;
+    if (typeof imgRaw === 'string') {
+      const t = imgRaw.trim();
+      if (t && t !== 'null' && /^https?:\/\//i.test(t)) mug = t;
+    }
+    let ageStr: string | undefined;
+    const ageRaw = row.age;
+    if (typeof ageRaw === 'number' && Number.isFinite(ageRaw)) {
+      ageStr = String(Math.round(ageRaw));
+    } else if (typeof ageRaw === 'string') {
+      const a = ageRaw.trim();
+      if (a) ageStr = a.replace(/[^\d]/g, '') || a;
+    }
+    const dobStr = typeof row.dob === 'string' ? row.dob.slice(0, 10) : undefined;
+    const ageFromDobVal = dobStr ? ageFromDob(dobStr) : null;
+    if (ageFromDobVal != null) {
+      ageStr = String(ageFromDobVal);
+    }
+    return {
+      name: String(row.name ?? '').trim(),
+      age: ageStr,
+      dob: dobStr,
+      state: typeof row.state === 'string' ? row.state : undefined,
+      zip: typeof row.zipcode === 'string' ? row.zipcode : undefined,
+      mugshotUrl: mug,
+      sourceId: typeof row.personUuid === 'string' ? row.personUuid : undefined,
+    };
+  }).filter((m) => m.name.length > 0);
 
   if (!matches.length) {
     return { status: 'clear', matches: [], disclaimer: DISCLAIMER };
@@ -257,7 +296,8 @@ Deno.serve(async (req: Request) => {
       ? Math.round(body.age)
       : null;
   const dobTrim = body.dob?.trim() || null;
-  const queryAge = ageInput ?? (dobTrim ? ageFromDob(dobTrim) : null);
+  const dobDerivedAge = dobTrim ? ageFromDob(dobTrim) : null;
+  const queryAge = dobDerivedAge != null ? dobDerivedAge : ageInput;
   const city = body.city?.trim() || null;
   const state = body.state?.trim() || null;
   const zip = body.zip?.trim() || null;

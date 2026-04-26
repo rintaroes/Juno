@@ -1,6 +1,6 @@
 import { ChevronLeft, UserRound } from 'lucide-react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, memo } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -13,8 +13,10 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { AppDock } from '../../components/AppDock';
 import type { RegistryMatch } from '../../lib/api/registry';
+import { ageFromIsoDobLocal } from '../../lib/registryAge';
 import {
   getRegistryCheck,
   linkRegistryCheckToRoster,
@@ -47,8 +49,16 @@ function parseMatches(row: RegistryCheck | null): RegistryMatch[] {
   );
 }
 
+/** Many rows include a bad/empty image URL; RN Image then shows a blank disc. */
+function sanitizeHttpUrl(u?: string | null): string | null {
+  const t = u?.trim();
+  if (!t || t === 'null' || t === 'undefined') return null;
+  if (!/^https?:\/\//i.test(t)) return null;
+  return t;
+}
+
 function hasMugshot(m: RegistryMatch) {
-  return Boolean(m.mugshotUrl?.trim());
+  return sanitizeHttpUrl(m.mugshotUrl) != null;
 }
 
 function sortMatchesWithPhotosFirst(list: RegistryMatch[]) {
@@ -59,6 +69,129 @@ function sortMatchesWithPhotosFirst(list: RegistryMatch[]) {
     return a.name.localeCompare(b.name);
   });
 }
+
+function normalizeName(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** Same image URL with different query params (or same person, multiple addresses). */
+function mugshotDedupeKey(url: string): string {
+  const t = url.trim();
+  try {
+    const u = new URL(t);
+    return `${u.origin}${u.pathname}`.toLowerCase();
+  } catch {
+    return t;
+  }
+}
+
+/**
+ * Offenders.io often returns the same person multiple times (e.g. multiple addresses).
+ * `sourceId` is `personUuid` when present — one id per person. Otherwise fall back to the same
+ * mugshot asset (origin+pathname) or a name+location composite without a photo.
+ */
+function dedupeMatches(list: RegistryMatch[]): RegistryMatch[] {
+  const seenPerson = new Set<string>();
+  const seenPhoto = new Set<string>();
+  const seenNoPhoto = new Set<string>();
+  const out: RegistryMatch[] = [];
+
+  for (const m of list) {
+    const pid = m.sourceId?.trim();
+    if (pid) {
+      if (seenPerson.has(pid)) continue;
+      seenPerson.add(pid);
+      out.push(m);
+      continue;
+    }
+    const url = sanitizeHttpUrl(m.mugshotUrl);
+    if (url) {
+      const k = mugshotDedupeKey(url);
+      if (seenPhoto.has(k)) continue;
+      seenPhoto.add(k);
+      out.push(m);
+      continue;
+    }
+    const nk = [
+      normalizeName(m.name),
+      (m.dob ?? '').trim().slice(0, 10),
+      (m.state ?? '').trim().toLowerCase(),
+      (m.zip ?? '').trim(),
+    ].join('|');
+    if (seenNoPhoto.has(nk)) continue;
+    seenNoPhoto.add(nk);
+    out.push(m);
+  }
+  return out;
+}
+
+/** Default avatar when there is no photo or the image failed to load (high contrast on light UI). */
+function DefaultRegistryAvatar({ size }: { size: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 56 56" accessibilityRole="image">
+      <Circle cx="28" cy="28" r="28" fill="#9ca3af" />
+      <Circle cx="28" cy="21" r="9" fill="#374151" />
+      <Path d="M 10 52 C 10 40 46 40 46 52 L 46 56 L 10 56 Z" fill="#374151" />
+    </Svg>
+  );
+}
+
+function matchAgeLabel(m: RegistryMatch): string | null {
+  const fromDob = ageFromIsoDobLocal(m.dob);
+  if (fromDob != null) return `Age ${fromDob}`;
+  const raw = m.age?.trim();
+  if (raw) {
+    const n = parseInt(raw.replace(/\D/g, ''), 10);
+    if (!Number.isNaN(n) && n > 0 && n < 130) return `Age ${n}`;
+    return `Age ${raw}`;
+  }
+  return null;
+}
+
+function formatMatchMeta(m: RegistryMatch) {
+  return [matchAgeLabel(m), m.state, m.zip].filter(Boolean).join(' · ') || '—';
+}
+
+const MatchMugshotOrDefault = memo(function MatchMugshotOrDefault({
+  name,
+  mugshotUrl,
+  onOpenPreview,
+}: {
+  name: string;
+  mugshotUrl?: string;
+  onOpenPreview: (url: string) => void;
+}) {
+  const uri = sanitizeHttpUrl(mugshotUrl);
+  const [failed, setFailed] = useState(false);
+
+  if (uri && !failed) {
+    return (
+      <View style={styles.avatarColumn}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Open face photo for ${name}`}
+          onPress={() => onOpenPreview(uri)}
+          style={({ pressed }) => [styles.avatarPressable, pressed && styles.pressed]}
+        >
+          <Image
+            source={{ uri }}
+            style={styles.avatarImage}
+            onError={() => setFailed(true)}
+          />
+        </Pressable>
+        <Text style={styles.faceHintUnderAvatar}>Tap to enlarge</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.avatarColumn}>
+      <View style={styles.avatarPlaceholder} accessibilityLabel={`No photo for ${name}`}>
+        <DefaultRegistryAvatar size={64} />
+      </View>
+    </View>
+  );
+});
 
 function statusLabel(status: string) {
   switch (status) {
@@ -93,7 +226,7 @@ export default function RegistryResultScreen() {
 
   const matches = useMemo(() => parseMatches(row), [row]);
   const sortedMatches = useMemo(
-    () => sortMatchesWithPhotosFirst(matches),
+    () => sortMatchesWithPhotosFirst(dedupeMatches(matches)),
     [matches],
   );
 
@@ -252,41 +385,22 @@ export default function RegistryResultScreen() {
             <Text style={styles.sectionTitle}>Possible registry records</Text>
             {sortedMatches.map((m, i) => (
               <View
-                key={m.sourceId ?? `${m.name}-${i}`}
+                key={m.sourceId ?? `${m.name}-${m.dob ?? ''}-${m.zip ?? ''}-${i}`}
                 style={[styles.matchCard, ambientCard, styles.matchRow]}
               >
-                {m.mugshotUrl ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Open face photo for ${m.name}`}
-                    onPress={() => setFacePreviewUrl(m.mugshotUrl ?? null)}
-                    style={({ pressed }) => [styles.avatarPressable, pressed && styles.pressed]}
-                  >
-                    <Image source={{ uri: m.mugshotUrl }} style={styles.avatarImage} />
-                  </Pressable>
-                ) : (
-                  <View
-                    style={styles.avatarPlaceholder}
-                    accessibilityLabel={`No photo for ${m.name}`}
-                  >
-                    <UserRound color={colors.slate400} size={28} strokeWidth={1.8} />
-                  </View>
-                )}
+                <MatchMugshotOrDefault
+                  name={m.name}
+                  mugshotUrl={m.mugshotUrl}
+                  onOpenPreview={(url) => setFacePreviewUrl(url)}
+                />
                 <View style={styles.matchBody}>
                   <Text style={styles.matchName}>{m.name}</Text>
-                  <Text style={styles.matchMeta}>
-                    {[m.dob, m.state, m.zip].filter(Boolean).join(' · ') || '—'}
-                  </Text>
-                  {m.mugshotUrl ? (
-                    <Text style={styles.faceHint}>Tap photo to enlarge</Text>
-                  ) : null}
+                  <Text style={styles.matchMeta}>{formatMatchMeta(m)}</Text>
                 </View>
               </View>
             ))}
           </View>
-        ) : row.status !== 'clear' ? null : (
-          <Text style={styles.clearNote}>No matching public registry entries for this query.</Text>
-        )}
+        ) : null}
 
         <Text style={styles.disclaimer}>{disclaimer}</Text>
 
@@ -463,8 +577,12 @@ const styles = StyleSheet.create({
   },
   matchRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacing.md,
+  },
+  avatarColumn: {
+    width: 64,
+    alignItems: 'center',
   },
   avatarPressable: {
     borderRadius: radii.full,
@@ -480,21 +598,22 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: radii.full,
-    backgroundColor: colors.surfaceContainerHigh,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.outlineVariant,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#d1d5db',
   },
   matchBody: {
     flex: 1,
     minWidth: 0,
   },
-  faceHint: {
-    marginTop: 6,
+  faceHintUnderAvatar: {
+    marginTop: 4,
     fontFamily: fontFamily.medium,
     fontSize: typeScale.labelSm,
     color: colors.tertiary,
+    textAlign: 'center',
+    maxWidth: 72,
   },
   matchName: {
     fontFamily: fontFamily.semiBold,
@@ -506,12 +625,6 @@ const styles = StyleSheet.create({
     fontSize: typeScale.labelMd,
     color: colors.onSurfaceVariant,
     marginTop: 4,
-  },
-  clearNote: {
-    fontFamily: fontFamily.regular,
-    fontSize: typeScale.bodyMd,
-    color: colors.onSurfaceVariant,
-    marginBottom: spacing.lg,
   },
   disclaimer: {
     fontFamily: fontFamily.regular,

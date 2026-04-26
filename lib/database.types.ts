@@ -288,11 +288,120 @@ export type Database = {
           },
         ];
       };
+      date_sessions: {
+        Row: {
+          companion_ai_summary: string | null;
+          companion_display_name: string;
+          ended_at: string | null;
+          id: string;
+          last_known_lat: number | null;
+          last_known_lng: number | null;
+          notes: string | null;
+          roster_person_id: string;
+          started_at: string;
+          status: string;
+          timer_minutes: number | null;
+          user_id: string;
+        };
+        Insert: {
+          companion_ai_summary?: string | null;
+          companion_display_name: string;
+          ended_at?: string | null;
+          id?: string;
+          last_known_lat?: number | null;
+          last_known_lng?: number | null;
+          notes?: string | null;
+          roster_person_id: string;
+          started_at?: string;
+          status: string;
+          timer_minutes?: number | null;
+          user_id: string;
+        };
+        Update: {
+          companion_ai_summary?: string | null;
+          companion_display_name?: string;
+          ended_at?: string | null;
+          id?: string;
+          last_known_lat?: number | null;
+          last_known_lng?: number | null;
+          notes?: string | null;
+          roster_person_id?: string;
+          started_at?: string;
+          status?: string;
+          timer_minutes?: number | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'date_sessions_roster_person_id_fkey';
+            columns: ['roster_person_id'];
+            isOneToOne: false;
+            referencedRelation: 'roster_people';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'date_sessions_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      live_locations: {
+        Row: {
+          accuracy: number | null;
+          active_date_session_id: string | null;
+          lat: number;
+          lng: number;
+          status: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          accuracy?: number | null;
+          active_date_session_id?: string | null;
+          lat: number;
+          lng: number;
+          status: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          accuracy?: number | null;
+          active_date_session_id?: string | null;
+          lat?: number;
+          lng?: number;
+          status?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'live_locations_active_date_session_id_fkey';
+            columns: ['active_date_session_id'];
+            isOneToOne: false;
+            referencedRelation: 'date_sessions';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'live_locations_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: true;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
+      end_date_session: {
+        Args: Record<PropertyKey, never>;
+        Returns: undefined;
+      };
       list_circle_relationships: {
         Args: Record<PropertyKey, never>;
         Returns: {
@@ -304,6 +413,24 @@ export type Database = {
           search_email: string;
           status: string;
           username: string;
+        }[];
+      };
+      list_friends_map_snapshots: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          accuracy: number | null;
+          active_date_session_id: string | null;
+          companion_ai_summary: string | null;
+          companion_display_name: string | null;
+          first_name: string | null;
+          lat: number | null;
+          lng: number | null;
+          profile_id: string;
+          session_started_at: string | null;
+          status: string;
+          timer_minutes: number | null;
+          updated_at: string | null;
+          username: string | null;
         }[];
       };
       request_friendship: {
@@ -330,6 +457,24 @@ export type Database = {
           search_email: string;
           username: string;
         }[];
+      };
+      start_date_session: {
+        Args: {
+          p_accuracy?: number | null;
+          p_lat: number;
+          p_lng: number;
+          p_roster_person_id: string;
+          p_timer_minutes?: number | null;
+        };
+        Returns: string;
+      };
+      update_my_live_location: {
+        Args: {
+          p_accuracy?: number | null;
+          p_lat: number;
+          p_lng: number;
+        };
+        Returns: undefined;
       };
     };
     Enums: {

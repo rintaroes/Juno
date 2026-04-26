@@ -29,7 +29,13 @@
     },
     "plugins": [
       "expo-font",
-      "expo-router"
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Juno uses your location on the Map tab so friends in your circle can see you while the app is open."
+        }
+      ]
     ]
   }
 }
