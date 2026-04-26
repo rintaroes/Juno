@@ -10,6 +10,7 @@ Use this short runbook to finish push setup when Expo account access is ready.
    - `npx eas-cli whoami`
    - `npx eas-cli init` (if project is not linked yet)
    - `npx eas-cli project:info`
+3. Copy the **project ID** from `project:info` (or the Expo dashboard) into repo `.env` as **`EXPO_PUBLIC_EAS_PROJECT_ID`** so `expo-notifications` can mint a push token (merged via `app.config.ts`).
 
 ## 2) Create Expo access token
 

@@ -5,9 +5,24 @@ const { expo } = require('./app.json') as { expo: ExpoConfig };
 
 export default (): ExpoConfig => {
   const mapsKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY?.trim();
+  const easProjectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID?.trim();
   const baseAndroid = expo.android ?? {};
+  const existingExtra =
+    expo.extra && typeof expo.extra === 'object' ? (expo.extra as Record<string, unknown>) : {};
+  const existingEas =
+    existingExtra.eas && typeof existingExtra.eas === 'object'
+      ? (existingExtra.eas as Record<string, unknown>)
+      : {};
+
   return {
     ...expo,
+    extra: {
+      ...existingExtra,
+      eas: {
+        ...existingEas,
+        ...(easProjectId ? { projectId: easProjectId } : {}),
+      },
+    },
     android: {
       ...baseAndroid,
       config: {

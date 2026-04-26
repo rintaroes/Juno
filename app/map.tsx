@@ -25,8 +25,10 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import type { MapPressEvent } from 'react-native-maps/lib/MapView.types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppDock } from '../components/AppDock';
 import {
@@ -59,12 +61,38 @@ import {
   typeScale,
 } from '../theme';
 
+/** Until GPS: street-level grid only (no continent view). Smaller delta = finer tile grid / more “squares”. */
+const INITIAL_MAP_LAT_DELTA = 0.008;
+const INITIAL_MAP_LNG_DELTA = 0.008;
+
 const FALLBACK_REGION: Region = {
   latitude: 39.8283,
   longitude: -98.5795,
-  latitudeDelta: 35,
-  longitudeDelta: 35,
+  latitudeDelta: INITIAL_MAP_LAT_DELTA,
+  longitudeDelta: INITIAL_MAP_LNG_DELTA,
 };
+
+/** Self: Find My–style — centered, tight (~block scale at mid-latitudes) */
+const SELF_SNAP_LAT_DELTA = 0.0085;
+const SELF_SNAP_LNG_DELTA = 0.0085;
+/** Friend: wider so context around them stays visible */
+const FRIEND_FOCUS_LAT_DELTA = 0.055;
+const FRIEND_FOCUS_LNG_DELTA = 0.055;
+/** Friend pin: animated camera duration (ms) */
+const FRIEND_PIN_FOCUS_MS = 720;
+/** Self pin / map tap / tab focus: snap to you (near-instant) */
+const SELF_PIN_FOCUS_MS = 1;
+/** Must match `styles.sheet.maxHeight` — used to offset camera so “You” sits in visible map above sheet + dock */
+const CIRCLE_SHEET_MAX_HEIGHT = 300;
+
+function regionForFriendFocus(latitude: number, longitude: number): Region {
+  return {
+    latitude,
+    longitude,
+    latitudeDelta: FRIEND_FOCUS_LAT_DELTA,
+    longitudeDelta: FRIEND_FOCUS_LNG_DELTA,
+  };
+}
 
 const TIMER_OPTIONS: { label: string; minutes: number | null }[] = [
   { label: 'None', minutes: null },
@@ -135,7 +163,7 @@ function PinMarker({
   onOpen,
 }: {
   pin: PinModel;
-  onOpen: (id: string) => void;
+  onOpen: (pin: PinModel) => void;
 }) {
   const badgeStyles =
     pin.badgeVariant === 'primary'
@@ -164,7 +192,7 @@ function PinMarker({
       coordinate={{ latitude: pin.latitude, longitude: pin.longitude }}
       anchor={{ x: 0.5, y: 1 }}
       tracksViewChanges={false}
-      onPress={() => onOpen(pin.id)}
+      onPress={() => onOpen(pin)}
     >
       <View style={styles.pinPress}>
         <View style={styles.pinColumn}>
@@ -202,10 +230,12 @@ function PinMarker({
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
   const mapRef = useRef<MapView>(null);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const lastServerPush = useRef(0);
+  const myCoordsRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
   const [query, setQuery] = useState('');
   const [friends, setFriends] = useState<FriendMapSnapshot[]>([]);
@@ -227,6 +257,27 @@ export default function MapScreen() {
 
   const dockH = useMemo(() => getDockOuterHeight(insets.bottom), [insets.bottom]);
   const sheetBottom = dockH + spacing.sm;
+  /** Dock + circle sheet overlap the map; shift camera center south so your pin sits in the middle of the *visible* map (Find My–style). */
+  const bottomChromePx = sheetBottom + CIRCLE_SHEET_MAX_HEIGHT;
+
+  const computeSelfSnapRegion = useCallback(
+    (latitude: number, longitude: number): Region => {
+      const h = Math.max(windowHeight, 1);
+      const b = Math.min(bottomChromePx, h * 0.52);
+      const latShift = (b / (2 * h)) * SELF_SNAP_LAT_DELTA;
+      return {
+        latitude: latitude - latShift,
+        longitude,
+        latitudeDelta: SELF_SNAP_LAT_DELTA,
+        longitudeDelta: SELF_SNAP_LNG_DELTA,
+      };
+    },
+    [windowHeight, bottomChromePx],
+  );
+
+  useEffect(() => {
+    myCoordsRef.current = myCoords;
+  }, [myCoords]);
 
   useEffect(() => {
     const id = setInterval(() => setTick((n) => n + 1), 30_000);
@@ -263,6 +314,21 @@ export default function MapScreen() {
     [],
   );
 
+  /** MapView sometimes ignores the first camera command until laid out; double-call fixes cold open. */
+  const scheduleSnapCameraToUser = useCallback(
+    (latitude: number, longitude: number) => {
+      const region = computeSelfSnapRegion(latitude, longitude);
+      const run = () => {
+        mapRef.current?.animateToRegion(region, SELF_PIN_FOCUS_MS);
+      };
+      requestAnimationFrame(() => {
+        run();
+        setTimeout(run, 160);
+      });
+    },
+    [computeSelfSnapRegion],
+  );
+
   useFocusEffect(
     useCallback(() => {
       if (!user?.id) {
@@ -271,7 +337,6 @@ export default function MapScreen() {
       }
 
       let alive = true;
-      let poll: ReturnType<typeof setInterval> | null = null;
       const supabase = getSupabase();
       const rtChannel = supabase
         .channel(`map-live-${user.id}`)
@@ -284,66 +349,102 @@ export default function MapScreen() {
         )
         .subscribe();
 
-      (async () => {
+      const poll = setInterval(() => {
+        void refreshFriends().catch(() => {});
+      }, 60_000);
+
+      void (async () => {
         try {
-          const { data: prof } = await getSupabase()
-            .from('profiles')
-            .select('first_name')
-            .eq('id', user.id)
-            .maybeSingle();
-          if (alive) setMyFirstName(prof?.first_name ?? null);
-        } catch {
-          /* ignore */
-        }
-
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (!alive) return;
-        setLocPerm(status === 'granted' ? 'granted' : 'denied');
-
-        if (status === 'granted') {
-          try {
-            const cur = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            if (!alive) return;
-            const { latitude, longitude } = cur.coords;
-            const acc = cur.coords.accuracy ?? null;
-            setMyCoords({ latitude, longitude });
-            await pushLiveToServer(latitude, longitude, acc, true);
-          } catch {
-            /* simulator / denied hardware */
-          }
-
-          watchRef.current?.remove();
-          watchRef.current = await Location.watchPositionAsync(
-            {
-              accuracy: Location.Accuracy.Balanced,
-              timeInterval: 15_000,
-              distanceInterval: 40,
-            },
-            (pos) => {
-              if (!alive) return;
-              const { latitude, longitude } = pos.coords;
-              const acc = pos.coords.accuracy ?? null;
-              setMyCoords({ latitude, longitude });
-              void pushLiveToServer(latitude, longitude, acc, false);
-            },
-          );
-        }
-
-        try {
-          await refreshFriends();
-          await refreshMyDateState();
+          await Promise.all([
+            refreshFriends(),
+            refreshMyDateState(),
+            (async () => {
+              try {
+                const { data: prof } = await supabase
+                  .from('profiles')
+                  .select('first_name')
+                  .eq('id', user.id)
+                  .maybeSingle();
+                if (alive) setMyFirstName(prof?.first_name ?? null);
+              } catch {
+                /* ignore */
+              }
+            })(),
+          ]);
           if (alive) setMapLoadError(null);
         } catch (e) {
           if (alive) {
             setMapLoadError(e instanceof Error ? e.message : 'Could not load circle map.');
           }
         }
+      })();
 
-        poll = setInterval(() => {
-          void refreshFriends().catch(() => {});
-        }, 60_000);
+      void (async () => {
+        let fg = await Location.getForegroundPermissionsAsync();
+        if (!alive) return;
+        if (!fg.granted && fg.canAskAgain !== false) {
+          fg = await Location.requestForegroundPermissionsAsync();
+        }
+        if (!alive) return;
+        setLocPerm(fg.granted ? 'granted' : 'denied');
+
+        if (!fg.granted) return;
+
+        const watchOpts: Location.LocationOptions = {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: 15_000,
+          distanceInterval: 40,
+        };
+
+        const startWatch = async () => {
+          watchRef.current?.remove();
+          watchRef.current = await Location.watchPositionAsync(watchOpts, (pos) => {
+            if (!alive) return;
+            const { latitude, longitude } = pos.coords;
+            const acc = pos.coords.accuracy ?? null;
+            setMyCoords({ latitude, longitude });
+            void pushLiveToServer(latitude, longitude, acc, false);
+          });
+        };
+
+        const cached = myCoordsRef.current;
+        if (cached) {
+          setMyCoords(cached);
+          await startWatch();
+          if (alive) scheduleSnapCameraToUser(cached.latitude, cached.longitude);
+          void Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low })
+            .then((cur) => {
+              if (!alive) return;
+              const { latitude, longitude } = cur.coords;
+              const acc = cur.coords.accuracy ?? null;
+              setMyCoords({ latitude, longitude });
+              void pushLiveToServer(latitude, longitude, acc, true);
+            })
+            .catch(() => {
+              /* hardware / simulator */
+            });
+          return;
+        }
+
+        let acquired: { latitude: number; longitude: number } | null = null;
+        try {
+          const cur = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          if (!alive) return;
+          const { latitude, longitude } = cur.coords;
+          const acc = cur.coords.accuracy ?? null;
+          acquired = { latitude, longitude };
+          setMyCoords({ latitude, longitude });
+          await pushLiveToServer(latitude, longitude, acc, true);
+        } catch {
+          /* simulator / denied hardware */
+        }
+
+        await startWatch();
+        if (alive && acquired) {
+          scheduleSnapCameraToUser(acquired.latitude, acquired.longitude);
+        }
       })();
 
       return () => {
@@ -351,9 +452,15 @@ export default function MapScreen() {
         void supabase.removeChannel(rtChannel);
         watchRef.current?.remove();
         watchRef.current = null;
-        if (poll) clearInterval(poll);
+        clearInterval(poll);
       };
-    }, [user?.id, pushLiveToServer, refreshFriends, refreshMyDateState]),
+    }, [
+      user?.id,
+      pushLiveToServer,
+      refreshFriends,
+      refreshMyDateState,
+      scheduleSnapCameraToUser,
+    ]),
   );
 
   const filteredFriends = useMemo(() => {
@@ -405,29 +512,6 @@ export default function MapScreen() {
     }
     return out;
   }, [friends, myCoords, myFirstName, myLive?.status, user?.id, user?.email]);
-
-  useEffect(() => {
-    const coords = pins.map((p) => ({ latitude: p.latitude, longitude: p.longitude }));
-    if (coords.length === 0) return;
-    const t = setTimeout(() => {
-      if (coords.length === 1) {
-        mapRef.current?.animateToRegion(
-          {
-            ...coords[0],
-            latitudeDelta: 0.06,
-            longitudeDelta: 0.06,
-          },
-          280,
-        );
-      } else {
-        mapRef.current?.fitToCoordinates(coords, {
-          edgePadding: { top: 120, right: 48, bottom: 220, left: 48 },
-          animated: true,
-        });
-      }
-    }, 400);
-    return () => clearTimeout(t);
-  }, [pins]);
 
   const selectedFriend = useMemo(() => {
     if (!selectedId?.startsWith('friend:')) return null;
@@ -540,9 +624,30 @@ export default function MapScreen() {
   const mapProvider = Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined;
   const mapStyle = Platform.OS === 'android' ? [...mapGoogleLightStyle] : undefined;
 
-  const onPinOpen = useCallback((id: string) => {
-    setSelectedId(id);
-  }, []);
+  const onOpenPin = useCallback(
+    (pin: PinModel) => {
+      const isSelf = pin.id.startsWith('me:');
+      const region = isSelf
+        ? computeSelfSnapRegion(pin.latitude, pin.longitude)
+        : regionForFriendFocus(pin.latitude, pin.longitude);
+      mapRef.current?.animateToRegion(region, isSelf ? SELF_PIN_FOCUS_MS : FRIEND_PIN_FOCUS_MS);
+      setSelectedId(pin.id);
+    },
+    [computeSelfSnapRegion],
+  );
+
+  const onMapPress = useCallback(
+    (e: MapPressEvent) => {
+      if (e.nativeEvent.action === 'marker-press') return;
+      if (!myCoords) return;
+      setSelectedId(null);
+      mapRef.current?.animateToRegion(
+        computeSelfSnapRegion(myCoords.latitude, myCoords.longitude),
+        SELF_PIN_FOCUS_MS,
+      );
+    },
+    [myCoords, computeSelfSnapRegion],
+  );
 
   const detailFriend = selectedFriend;
   const detailSelf = selectedId?.startsWith('me:');
@@ -562,9 +667,10 @@ export default function MapScreen() {
         showsBuildings
         showsUserLocation={false}
         toolbarEnabled={false}
+        onPress={onMapPress}
       >
         {pins.map((p) => (
-          <PinMarker key={p.id} pin={p} onOpen={onPinOpen} />
+          <PinMarker key={p.id} pin={p} onOpen={onOpenPin} />
         ))}
       </MapView>
 
@@ -1043,7 +1149,7 @@ const styles = StyleSheet.create({
   sheet: {
     position: 'absolute',
     zIndex: 30,
-    maxHeight: 300,
+    maxHeight: CIRCLE_SHEET_MAX_HEIGHT,
     borderRadius: 24,
     overflow: 'hidden',
     ...Platform.select({
