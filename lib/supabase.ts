@@ -1,5 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import {
+  createClient,
+  type SupabaseClient,
+  type User,
+} from '@supabase/supabase-js';
 import type { Database, TablesInsert } from './database.types';
 
 let client: SupabaseClient<Database> | null = null;
@@ -26,11 +30,19 @@ export function getSupabase(): SupabaseClient<Database> {
   return client;
 }
 
-type UpsertProfileInput = Pick<TablesInsert<'profiles'>, 'id' | 'first_name' | 'city'>;
+type UpsertProfileInput = Pick<TablesInsert<'profiles'>, 'id' | 'search_email'> &
+  Partial<Pick<TablesInsert<'profiles'>, 'first_name' | 'city'>>;
 
 export async function upsertProfile(values: UpsertProfileInput) {
   const { error } = await getSupabase()
     .from('profiles')
     .upsert(values, { onConflict: 'id' });
   if (error) throw error;
+}
+
+export async function ensureProfileForUser(user: User) {
+  await upsertProfile({
+    id: user.id,
+    search_email: user.email?.toLowerCase() ?? null,
+  });
 }

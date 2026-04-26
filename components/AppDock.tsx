@@ -22,13 +22,13 @@ export type DockTabId = 'protect' | 'roster' | 'map' | 'circles';
 const TABS: {
   id: DockTabId;
   label: string;
-  href: '/' | '/roster' | '/map' | null;
+  href: '/' | '/roster' | '/map' | '/circles';
   icon: typeof Shield;
 }[] = [
   { id: 'protect', label: 'Protect', href: '/', icon: Shield },
   { id: 'roster', label: 'Roster', href: '/roster', icon: BookUser },
   { id: 'map', label: 'Map', href: '/map', icon: MapPinned },
-  { id: 'circles', label: 'Circles', href: null, icon: UsersRound },
+  { id: 'circles', label: 'Circles', href: '/circles', icon: UsersRound },
 ];
 
 export function AppDock() {
@@ -40,6 +40,8 @@ export function AppDock() {
     ? 'roster'
     : pathname.includes('/map')
       ? 'map'
+      : pathname.includes('/circles')
+        ? 'circles'
       : 'protect';
   const bottom = Math.max(insets.bottom, 8);
 
@@ -63,11 +65,7 @@ export function AppDock() {
             accessibilityRole="button"
             accessibilityState={{ selected: isActive }}
             onPress={() => {
-              if (tab.href) {
-                router.replace(tab.href);
-                return;
-              }
-              console.log('dock', tab.id);
+              router.replace(tab.href);
             }}
             style={({ pressed }) => [
               styles.dockItem,

@@ -7,7 +7,7 @@ import {
   useMemo,
   useState,
 } from 'react';
-import { getSupabase } from '../lib/supabase';
+import { ensureProfileForUser, getSupabase } from '../lib/supabase';
 
 type AuthContextValue = {
   session: Session | null;
@@ -32,6 +32,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (!mounted) return;
       setSession(nextSession ?? null);
+      if (nextSession?.user) {
+        void ensureProfileForUser(nextSession.user).catch((profileError) => {
+          if (!mounted) return;
+          setError(
+            profileError instanceof Error
+              ? profileError.message
+              : 'Failed to initialize profile.',
+          );
+        });
+      }
     });
     setLoading(false);
 

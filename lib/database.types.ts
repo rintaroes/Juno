@@ -14,27 +14,100 @@ export type Database = {
     Tables: {
       profiles: {
         Row: {
+          allow_friend_requests: boolean;
           city: string | null;
           created_at: string;
+          discoverable_by_email: boolean;
+          discoverable_by_phone: boolean;
+          discoverable_by_username: boolean;
           first_name: string | null;
           id: string;
+          phone_e164: string | null;
+          search_email: string | null;
           updated_at: string;
+          username: string | null;
         };
         Insert: {
+          allow_friend_requests?: boolean;
           city?: string | null;
           created_at?: string;
+          discoverable_by_email?: boolean;
+          discoverable_by_phone?: boolean;
+          discoverable_by_username?: boolean;
           first_name?: string | null;
           id: string;
+          phone_e164?: string | null;
+          search_email?: string | null;
           updated_at?: string;
+          username?: string | null;
         };
         Update: {
+          allow_friend_requests?: boolean;
           city?: string | null;
           created_at?: string;
+          discoverable_by_email?: boolean;
+          discoverable_by_phone?: boolean;
+          discoverable_by_username?: boolean;
           first_name?: string | null;
           id?: string;
+          phone_e164?: string | null;
+          search_email?: string | null;
           updated_at?: string;
+          username?: string | null;
         };
         Relationships: [];
+      };
+      friendships: {
+        Row: {
+          addressee_id: string;
+          created_at: string;
+          declined_by: string | null;
+          id: string;
+          requester_id: string;
+          responded_at: string | null;
+          status: string;
+        };
+        Insert: {
+          addressee_id: string;
+          created_at?: string;
+          declined_by?: string | null;
+          id?: string;
+          requester_id: string;
+          responded_at?: string | null;
+          status: string;
+        };
+        Update: {
+          addressee_id?: string;
+          created_at?: string;
+          declined_by?: string | null;
+          id?: string;
+          requester_id?: string;
+          responded_at?: string | null;
+          status?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'friendships_addressee_id_fkey';
+            columns: ['addressee_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'friendships_declined_by_fkey';
+            columns: ['declined_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'friendships_requester_id_fkey';
+            columns: ['requester_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       chat_uploads: {
         Row: {
@@ -151,7 +224,40 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      list_circle_relationships: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          city: string;
+          direction: string;
+          first_name: string;
+          friendship_id: string;
+          profile_id: string;
+          status: string;
+          username: string;
+        }[];
+      };
+      request_friendship: {
+        Args: { target_profile_id: string };
+        Returns: string;
+      };
+      remove_friendship: {
+        Args: { p_friendship_id: string };
+        Returns: undefined;
+      };
+      respond_to_friend_request: {
+        Args: { p_accept: boolean; p_friendship_id: string };
+        Returns: undefined;
+      };
+      search_friend_profiles: {
+        Args: { p_query: string };
+        Returns: {
+          city: string;
+          first_name: string;
+          matched_on: string;
+          profile_id: string;
+          username: string;
+        }[];
+      };
     };
     Enums: {
       [_ in never]: never;
