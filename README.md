@@ -13,9 +13,9 @@ This document is the **source of truth for technical implementation** of the cur
 **What exists in this repository today:**
 
 - **Expo SDK 54** app with **Expo Router** (`expo-router/entry`).
-- **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 + Phase 2 + Phase 4 + Phase 6 + Phase 7** are implemented in this repo (Phase 4 was built before Phase 2; order in `JUNO_MVP.md` may differ).
+- **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 + Phase 2 + Phase 4 + Phase 6 + Phase 7 + Phase 8** are implemented in this repo (Phase 4 was built before Phase 2; order in `JUNO_MVP.md` may differ).
 - **Home route (`/`)** — “**Safety Check**” (requires sign-in): **Juno** wordmark, dashed **upload screenshot** card (optional; still stubbed — `console.log` only), a single form card with **first name**, **last name**, **city** (optional), collapsible **more** (state, ZIP, DOB), **Run safety check** gradient CTA — calls Supabase Edge Function **`lookup-registry`** (Offenders.io on the server), then opens **`/registry/result`** with the saved `registry_checks` id. **Sign out** and disclaimer copy. No “signed in as” line on this screen.
-- **Map route (`/map`)** — **Phase 7 live circle map + date mode:** **`expo-location`** (foreground, while Map is focused) → **`update_my_live_location`** RPC; **Supabase Realtime** + slow poll on `live_locations`; **`list_friends_map_snapshots`** for accepted **Circles** friends (pins when lat/lng exist). **`react-native-maps`**: Android uses **`PROVIDER_GOOGLE`** + light JSON style; **iOS uses Apple MapKit** (no Google Maps key). Glass **search** filters circle sheet by name/username; **Date mode** sheet: pick roster person, optional timer, **Start date** / **End date** (`start_date_session` / `end_date_session` RPCs); friend/self **modals** (started time, timer line, optional **roster AI snapshot** from `date_sessions.companion_ai_summary`). Tables: **`live_locations`**, **`date_sessions`** (+ RLS, migrations `phase7_*`).
+- **Map route (`/map`)** — **Phase 7 + 8 live circle map + date mode + safety signals:** **`expo-location`** (foreground, while Map is focused) → **`update_my_live_location`** RPC; **Supabase Realtime** + slow poll on `live_locations`; **`list_friends_map_snapshots`** for accepted **Circles** friends (pins when lat/lng exist). **`react-native-maps`**: Android uses **`PROVIDER_GOOGLE`** + light JSON style; **iOS uses Apple MapKit** (no Google Maps key). Glass **search** filters circle sheet by name/username; **Date mode** sheet: pick roster person, optional timer, **Start date** / **End date** (`start_date_session` / `end_date_session` RPCs), plus **I'm safe** / **Alert circle** actions (`date-safety-signal`). Starting date mode also performs best-effort notify (`notify-date-mode-started`). Tables: **`live_locations`**, **`date_sessions`**, **`push_devices`** (+ RLS, migrations `phase7_*`, `phase8_*`).
 - **Report route (`/report`)** — **Legacy / demo** “background check” UI (initials avatar, verification copy, share-with-circle sheet). **Not** the primary path from **`/`** today; the live registry flow is **`/` → `/registry/result`**.
 - **Auth route (`/auth`)** — email/password **sign in** and **sign up** (`signInWithPassword` / `signUp`); bouncy `ScrollView` + `KeyboardAvoidingView` so primary actions stay reachable when the keyboard is open.
 - **Shared `AppDock`** — `components/AppDock.tsx`: **Protect · Roster · Map · Circles**; Protect ↔ `/`, Roster ↔ `/roster`, Map ↔ `/map`, Circles ↔ `/circles` via `router.replace` (instant transition: root **`Stack`** uses **`animation: 'none'`**).
@@ -26,9 +26,9 @@ This document is the **source of truth for technical implementation** of the cur
 
 **Not in this repo yet (typical next steps):**
 
-- **Phase 3 (reverse image)** — **Intentionally deferred:** no provider meets a reliable / legal bar for photo → real social profiles for this UX. **Phase 5** (tea), **Phase 8** (pushes), background location beyond Map-tab foreground sharing.
+- **Phase 3 (reverse image)** — **Intentionally deferred:** no provider meets a reliable / legal bar for photo → real social profiles for this UX. **Phase 5** (tea), background location beyond Map-tab foreground sharing.
 
-**Current status:** **Phase 0 + Phase 1 + Phase 2 + Phase 4 + Phase 6 + Phase 7**. Supabase includes **`public.registry_checks`**, **`public.chat_uploads`**, **`public.friendships`** (+ RPCs for circle), **`public.live_locations`**, **`public.date_sessions`**, private **`chat-screenshots`** storage; Edge Functions **`lookup-registry`** and **`summarize-chat-screenshot`**. Home **Run safety check** persists a row and shows real matches on **`/registry/result`**.
+**Current status:** **Phase 0 + Phase 1 + Phase 2 + Phase 4 + Phase 6 + Phase 7 + Phase 8**. Supabase includes **`public.registry_checks`**, **`public.chat_uploads`**, **`public.friendships`** (+ RPCs for circle), **`public.live_locations`**, **`public.date_sessions`**, **`public.push_devices`**, private **`chat-screenshots`** storage; Edge Functions **`lookup-registry`**, **`summarize-chat-screenshot`**, **`register-push-token`**, **`notify-date-mode-started`**, **`date-safety-signal`**, **`check-date-timers`**. Home **Run safety check** persists a row and shows real matches on **`/registry/result`**.
 
 ### Phase 0 checklist (aligned to `JUNO_MVP.md` §8)
 
@@ -75,6 +75,18 @@ This document is the **source of truth for technical implementation** of the cur
 | Friend / self detail + started time + snapshot text | Done (`companion_ai_summary` migration `20260427183000_phase7_companion_ai_snapshot.sql`) |
 | Realtime on `live_locations` | Done (publication in migration; client subscribes on Map focus) |
 
+### Phase 8 checklist (push + safety escalation — `JUNO_MVP.md` §8)
+
+| Item | Status |
+|------|--------|
+| `push_devices` table + RLS | Done (`20260428120000_phase8_push_safety.sql`) |
+| `date_sessions` idempotency columns | Done (`started_push_sent_at`, `timer_push_sent_at`) |
+| Push token registration from app | Done (`lib/pushNotifications.ts`, `AuthProvider`, `register-push-token`) |
+| Notify circle on date start | Done (`notify-date-mode-started`, invoked from `app/map.tsx`) |
+| Safety actions: I’m safe / alert circle | Done (`date-safety-signal`, buttons in `app/map.tsx`) |
+| Timer-expired job endpoint | Done (`check-date-timers`, RPC `list_expired_date_timer_sessions`) |
+| Scheduler example SQL | Done (`supabase/cron-examples/invoke-check-date-timers.sql`) |
+
 **Apply migrations** to your hosted project with **`supabase db push`** (see `supabase/migrations/`). If migration history was created under different version ids elsewhere, use **`supabase migration repair`** / **`db pull`** per Supabase CLI messages — do not re-run destructive SQL blindly.
 
 ---
@@ -92,6 +104,7 @@ This document is the **source of truth for technical implementation** of the cur
 | Images | **expo-image** + **expo-image-picker** |
 | Maps | **react-native-maps** (Android: **Google** provider + JSON style; iOS: **MapKit**) |
 | Location | **expo-location** (when-in-use; Map tab foreground updates) |
+| Push notifications | **expo-notifications** (permission + Expo token registration) |
 | Gradients | **expo-linear-gradient** |
 | Blur | **expo-blur** (map search/sheet chrome; report **Share** modal scrim) |
 | Fonts | **expo-font** + **@expo-google-fonts/plus-jakarta-sans** (primary UI). **Fraunces** / **Inter** packages are present in `package.json` but are **not** loaded in root `_layout` today. |
@@ -128,7 +141,8 @@ juno/
 │   ├── database.types.ts # Supabase DB types (tables + RPCs; keep in sync with migrations)
 │   ├── supabase.ts      # Typed `getSupabase()` + profile upsert helper
 │   ├── roster.ts        # Roster CRUD helpers
-│   ├── dateMode.ts      # Phase 7: map RPCs + live location / date session helpers
+│   ├── dateMode.ts      # Phase 7/8: map RPCs + live location / date session + safety signal helpers
+│   ├── pushNotifications.ts # Expo permission + token + register-push-token invoke
 │   ├── circles.ts       # Phase 6: circle RPCs + privacy helpers
 │   ├── api/
 │   │   └── registry.ts  # `lookupRegistry()` → `lookup-registry` Edge Function
@@ -137,10 +151,18 @@ juno/
 ├── providers/
 │   └── AuthProvider.tsx # Session handling + auth state listener
 ├── supabase/
-│   ├── migrations/      # Through Phase 7: profiles, roster, registry, chat, friendships, live_locations, date_sessions
+│   ├── migrations/      # Through Phase 8: profiles, roster, registry, chat, friendships, live_locations, date_sessions, push_devices
 │   └── functions/
 │       ├── lookup-registry/
 │       │   └── index.ts # Edge Function: Offenders.io search + insert `registry_checks`
+│       ├── register-push-token/
+│       │   └── index.ts # Edge Function: save Expo token in `push_devices`
+│       ├── notify-date-mode-started/
+│       │   └── index.ts # Edge Function: push accepted circle on date start
+│       ├── date-safety-signal/
+│       │   └── index.ts # Edge Function: push circle for `im_safe` / `alert_circle`
+│       ├── check-date-timers/
+│       │   └── index.ts # Edge Function: scheduled timer-expired pushes
 │       └── summarize-chat-screenshot/
 │           └── index.ts # Edge Function: OCR + AI summary via Anthropic
 ├── theme/
@@ -152,7 +174,7 @@ juno/
 │   ├── radii.ts         # Corner radii (including sheet / dock lip)
 │   ├── mapGoogleStyle.ts # Google Maps `customMapStyle` JSON (Android)
 │   └── shadows.ts       # ambient card / CTA / dock / pin glow (imports `colors`)
-├── app.json             # Expo config (scheme `juno`, plugins: expo-font, expo-router, expo-location)
+├── app.json             # Expo config (scheme `juno`, plugins: expo-font, expo-router, expo-location, expo-notifications)
 ├── app.config.ts        # Merges `app.json` + optional `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY` for Android tiles
 ├── babel.config.js      # babel-preset-expo + expo-router/babel
 ├── package.json         # main: expo-router/entry
@@ -293,7 +315,7 @@ Use **`npm run typecheck`** (or `npx tsc --noEmit`) before merging changes that 
 
 ## 8) Native / Expo Config Notes
 
-- **`app.json`**: `scheme: "juno"` for deep linking; `plugins` include **`expo-font`**, **`expo-router`**, and **`expo-location`** (when-in-use permission copy for Map).
+- **`app.json`**: `scheme: "juno"` for deep linking; `plugins` include **`expo-font`**, **`expo-router`**, **`expo-location`** (when-in-use permission copy for Map), and **`expo-notifications`**.
 - **`app.config.ts`**: spreads **`app.json`** and injects **`android.config.googleMaps.apiKey`** when `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY` is set.
 - **`newArchEnabled`**: `true` in `app.json` — align with Expo docs if you hit native module issues.
 - **Babel:** `babel-preset-expo` and `@babel/core` are **dependencies** so Metro’s transform worker can always resolve the preset (avoids “Cannot find module 'babel-preset-expo'” when `devDependencies` are omitted).
@@ -304,7 +326,7 @@ Use **`npm run typecheck`** (or `npx tsc --noEmit`) before merging changes that 
 
 1. **Phase 3 (`JUNO_MVP.md`)** — Reverse image search **deferred** (documented in `JUNO_MVP.md` §8 Phase 3): no suitable provider for dependable social graph from a single photo.
 2. **Safety Check upload** — Wire dashed upload card on **`/`** to a real pipeline (still stubbed).
-3. **Phase 8+** — Push when date starts / timer ends; optional background location beyond Map-tab foreground sharing; tea inbox / packages per MVP.
+3. **Background location beyond Map tab** — optional future enhancement if product decides to track outside foreground map usage.
 4. **Unused font packages** — Remove `@expo-google-fonts/fraunces` / `inter` or load them in `_layout` if design requires.
 5. **Tests** — No unit/e2e suite yet; add Detox / Maestro / Jest as the app grows.
 6. **CI** — No pipeline documented; add when publishing builds (EAS).
@@ -333,4 +355,4 @@ This is a **living specification**. If a change affects runtime behavior, data s
 
 ---
 
-*Last aligned to repo: Phase 0–2 + Phase 4 (chat uploads + `summarize-chat-screenshot`) + Phase 6 (`/circles`, `friendships`) + Phase 7 (`/map` live locations + `date_sessions`, `lib/dateMode.ts`, migrations `phase7_*`, `expo-location`, optional Android Maps via `app.config.ts`).*
+*Last aligned to repo: Phase 0–2 + Phase 4 (chat uploads + `summarize-chat-screenshot`) + Phase 6 (`/circles`, `friendships`) + Phase 7 (`/map` live locations + `date_sessions`, `lib/dateMode.ts`, migrations `phase7_*`, `expo-location`) + Phase 8 (`push_devices`, `lib/pushNotifications.ts`, `register-push-token`, `notify-date-mode-started`, `date-safety-signal`, `check-date-timers`, migrations `phase8_*`).*

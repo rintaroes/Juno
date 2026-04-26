@@ -1,0 +1,18 @@
+-- Example: schedule check-date-timers every 2 minutes using pg_cron + pg_net.
+-- Requires: extensions pg_cron, pg_net; Vault secret with your project service_role JWT.
+-- Replace placeholders: <PROJECT_REF>, <SERVICE_ROLE_JWT_FROM_VAULT>.
+
+-- select cron.schedule(
+--   'juno-check-date-timers',
+--   '*/2 * * * *',
+--   $$
+--   select net.http_post(
+--     url := 'https://<PROJECT_REF>.supabase.co/functions/v1/check-date-timers',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'SUPABASE_SERVICE_ROLE_KEY')
+--     ),
+--     body := '{}'::jsonb
+--   );
+--   $$
+-- );

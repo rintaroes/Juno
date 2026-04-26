@@ -299,8 +299,10 @@ export type Database = {
           notes: string | null;
           roster_person_id: string;
           started_at: string;
+          started_push_sent_at: string | null;
           status: string;
           timer_minutes: number | null;
+          timer_push_sent_at: string | null;
           user_id: string;
         };
         Insert: {
@@ -313,8 +315,10 @@ export type Database = {
           notes?: string | null;
           roster_person_id: string;
           started_at?: string;
+          started_push_sent_at?: string | null;
           status: string;
           timer_minutes?: number | null;
+          timer_push_sent_at?: string | null;
           user_id: string;
         };
         Update: {
@@ -327,8 +331,10 @@ export type Database = {
           notes?: string | null;
           roster_person_id?: string;
           started_at?: string;
+          started_push_sent_at?: string | null;
           status?: string;
           timer_minutes?: number | null;
+          timer_push_sent_at?: string | null;
           user_id?: string;
         };
         Relationships: [
@@ -341,6 +347,41 @@ export type Database = {
           },
           {
             foreignKeyName: 'date_sessions_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      push_devices: {
+        Row: {
+          created_at: string;
+          expo_push_token: string;
+          id: string;
+          platform: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          expo_push_token: string;
+          id?: string;
+          platform?: string | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          expo_push_token?: string;
+          id?: string;
+          platform?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'push_devices_user_id_fkey';
             columns: ['user_id'];
             isOneToOne: false;
             referencedRelation: 'profiles';

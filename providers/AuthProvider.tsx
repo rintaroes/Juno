@@ -7,6 +7,8 @@ import {
   useMemo,
   useState,
 } from 'react';
+import { Platform } from 'react-native';
+import { registerExpoPushTokenForSignedInUser } from '../lib/pushNotifications';
 import { ensureProfileForUser, getSupabase } from '../lib/supabase';
 
 type AuthContextValue = {
@@ -50,6 +52,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authListener.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!session?.user || Platform.OS === 'web') return;
+    void registerExpoPushTokenForSignedInUser();
+  }, [session?.access_token, session?.user?.id]);
 
   const signOut = useCallback(async () => {
     const { error: signOutError } = await getSupabase().auth.signOut();

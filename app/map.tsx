@@ -7,6 +7,8 @@ import {
   Heart,
   Home,
   MapPin,
+  ShieldCheck,
+  Siren,
   UserRound,
   X,
 } from 'lucide-react-native';
@@ -32,8 +34,11 @@ import {
   getMyActiveDateSession,
   getMyLiveLocation,
   listFriendsMapSnapshots,
+  notifyCircleDateModeStarted,
+  sendDateSafetySignal,
   startDateSession,
   updateMyLiveLocation,
+  type DateSafetyKind,
   type DateSessionRow,
   type FriendMapSnapshot,
   type LiveLocationRow,
@@ -217,6 +222,7 @@ export default function MapScreen() {
   const [myLive, setMyLive] = useState<LiveLocationRow | null>(null);
   const [mySession, setMySession] = useState<DateSessionRow | null>(null);
   const [dateActionLoading, setDateActionLoading] = useState(false);
+  const [safetySignalLoading, setSafetySignalLoading] = useState(false);
   const [tick, setTick] = useState(0);
 
   const dockH = useMemo(() => getDockOuterHeight(insets.bottom), [insets.bottom]);
@@ -454,13 +460,14 @@ export default function MapScreen() {
     }
     setDateActionLoading(true);
     try {
-      await startDateSession({
+      const sessionId = await startDateSession({
         rosterPersonId: selectedRosterId,
         timerMinutes: timerChoice,
         lat: myCoords.latitude,
         lng: myCoords.longitude,
         accuracy: null,
       });
+      void notifyCircleDateModeStarted(sessionId);
       await refreshMyDateState();
       await refreshFriends();
       setDateModalOpen(false);
@@ -471,6 +478,50 @@ export default function MapScreen() {
       setDateActionLoading(false);
     }
   }, [myCoords, refreshFriends, refreshMyDateState, selectedRosterId, timerChoice, user?.id]);
+
+  const sendSafety = useCallback(
+    async (kind: DateSafetyKind) => {
+      if (!mySession?.id) return;
+      setSafetySignalLoading(true);
+      try {
+        const sent = await sendDateSafetySignal(mySession.id, kind);
+        Alert.alert(
+          sent === 0 ? 'No push sent' : 'Sent',
+          sent === 0
+            ? 'No friends have push notifications set up yet.'
+            : kind === 'im_safe'
+              ? 'Your circle was notified you marked yourself safe.'
+              : 'Your circle was alerted.',
+        );
+      } catch (e) {
+        Alert.alert('Could not send', e instanceof Error ? e.message : 'Try again.');
+      } finally {
+        setSafetySignalLoading(false);
+      }
+    },
+    [mySession?.id],
+  );
+
+  const onTapSafety = useCallback(
+    (kind: DateSafetyKind) => {
+      if (!mySession?.id || safetySignalLoading) return;
+      if (kind === 'alert_circle') {
+        Alert.alert('Alert your circle?', 'Friends get a push so they can check in.', [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Send alert',
+            style: 'destructive',
+            onPress: () => {
+              void sendSafety('alert_circle');
+            },
+          },
+        ]);
+        return;
+      }
+      void sendSafety('im_safe');
+    },
+    [mySession?.id, safetySignalLoading, sendSafety],
+  );
 
   const onEndDate = useCallback(async () => {
     setDateActionLoading(true);
@@ -790,6 +841,32 @@ export default function MapScreen() {
                       <Text style={styles.summaryText}>{mySession.companion_ai_summary}</Text>
                     </View>
                   ) : null}
+                </View>
+                <View style={styles.safetyRow}>
+                  <Pressable
+                    onPress={() => onTapSafety('im_safe')}
+                    disabled={safetySignalLoading || dateActionLoading}
+                    style={({ pressed }) => [
+                      styles.safeBtn,
+                      pressed && styles.pressed,
+                      (safetySignalLoading || dateActionLoading) && styles.disabledBtn,
+                    ]}
+                  >
+                    <ShieldCheck size={18} color={colors.primary} strokeWidth={2} />
+                    <Text style={styles.safeBtnText}>I'm safe</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => onTapSafety('alert_circle')}
+                    disabled={safetySignalLoading || dateActionLoading}
+                    style={({ pressed }) => [
+                      styles.alertBtn,
+                      pressed && styles.pressed,
+                      (safetySignalLoading || dateActionLoading) && styles.disabledBtn,
+                    ]}
+                  >
+                    <Siren size={18} color={colors.onErrorContainer} strokeWidth={2} />
+                    <Text style={styles.alertBtnText}>Alert circle</Text>
+                  </Pressable>
                 </View>
                 <Pressable
                   onPress={onEndDate}
@@ -1322,6 +1399,45 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.bodyMd,
     color: colors.onSecondaryContainer,
+  },
+  safetyRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  safeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.surfaceContainerLowest,
+  },
+  safeBtnText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelSm,
+    color: colors.primary,
+  },
+  alertBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.error,
+    backgroundColor: colors.errorContainer,
+  },
+  alertBtnText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelSm,
+    color: colors.onErrorContainer,
   },
   timerLineRow: {
     flexDirection: 'row',
