@@ -17,6 +17,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { listChatUploads, type ChatUpload } from '../../lib/chatUploads';
+import {
+  listRegistryChecksForRoster,
+  type RegistryCheck,
+} from '../../lib/registryChecks';
 import { getSupabase } from '../../lib/supabase';
 import {
   deleteRosterPerson,
@@ -55,6 +59,7 @@ export default function RosterPersonScreen() {
 
   const [person, setPerson] = useState<RosterPerson | null>(null);
   const [chatUploads, setChatUploads] = useState<ChatUpload[]>([]);
+  const [registryChecks, setRegistryChecks] = useState<RegistryCheck[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingChat, setUploadingChat] = useState(false);
@@ -89,6 +94,8 @@ export default function RosterPersonScreen() {
         setPerson(data);
         setForm(toForm(data));
         await loadChatUploads(user.id, data.id);
+        const regRows = await listRegistryChecksForRoster(user.id, data.id);
+        setRegistryChecks(regRows);
       } catch (e) {
         Alert.alert('Could not load person', e instanceof Error ? e.message : 'Try again.');
         router.replace('/roster');
@@ -414,6 +421,53 @@ export default function RosterPersonScreen() {
               >
                 <Text style={styles.saveLabel}>{saving ? 'Saving...' : 'Save changes'}</Text>
               </Pressable>
+
+              <View style={styles.chatSection}>
+                <Text style={styles.chatSectionTitle}>Registry checks</Text>
+                <Text style={styles.chatSectionHint}>
+                  Linked lookups from Protect. Run a check for this person anytime.
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() =>
+                    router.push({
+                      pathname: '/registry/lookup',
+                      params: { rosterPersonId: id },
+                    })
+                  }
+                  style={({ pressed }) => [
+                    styles.chatUploadBtn,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.chatUploadLabel}>Run registry check</Text>
+                </Pressable>
+                {registryChecks.length === 0 ? (
+                  <Text style={styles.chatEmptyText}>No registry checks linked yet.</Text>
+                ) : (
+                  <View style={styles.chatList}>
+                    {registryChecks.map((c) => (
+                      <View key={c.id} style={styles.chatCard}>
+                        <Text style={styles.chatCardMeta}>
+                          {new Date(c.created_at).toLocaleString()} ·{' '}
+                          {c.status.replace(/_/g, ' ')}
+                        </Text>
+                        <Text style={styles.chatSummaryText}>
+                          Query: {c.query_name}
+                          {c.query_state ? ` · ${c.query_state}` : ''}
+                          {c.query_zip ? ` · ${c.query_zip}` : ''}
+                        </Text>
+                        {c.matched_name ? (
+                          <Text style={styles.chatOpeningLine}>
+                            Top match: {c.matched_name}
+                            {c.matched_state ? ` · ${c.matched_state}` : ''}
+                          </Text>
+                        ) : null}
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
 
               <View style={styles.chatSection}>
                 <Text style={styles.chatSectionTitle}>Chat Screenshot Summaries</Text>

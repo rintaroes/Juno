@@ -163,6 +163,75 @@ export type Database = {
           },
         ];
       };
+      registry_checks: {
+        Row: {
+          created_at: string;
+          id: string;
+          matched_dob: string | null;
+          matched_name: string | null;
+          matched_state: string | null;
+          matched_zip: string | null;
+          mugshot_url: string | null;
+          owner_id: string;
+          query_age: number | null;
+          query_name: string;
+          query_state: string | null;
+          query_zip: string | null;
+          raw_result: Json | null;
+          roster_person_id: string | null;
+          status: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          matched_dob?: string | null;
+          matched_name?: string | null;
+          matched_state?: string | null;
+          matched_zip?: string | null;
+          mugshot_url?: string | null;
+          owner_id: string;
+          query_age?: number | null;
+          query_name: string;
+          query_state?: string | null;
+          query_zip?: string | null;
+          raw_result?: Json | null;
+          roster_person_id?: string | null;
+          status: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          matched_dob?: string | null;
+          matched_name?: string | null;
+          matched_state?: string | null;
+          matched_zip?: string | null;
+          mugshot_url?: string | null;
+          owner_id?: string;
+          query_age?: number | null;
+          query_name?: string;
+          query_state?: string | null;
+          query_zip?: string | null;
+          raw_result?: Json | null;
+          roster_person_id?: string | null;
+          status?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'registry_checks_owner_id_fkey';
+            columns: ['owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'registry_checks_roster_person_id_fkey';
+            columns: ['roster_person_id'];
+            isOneToOne: false;
+            referencedRelation: 'roster_people';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       roster_people: {
         Row: {
           ai_summary: string | null;

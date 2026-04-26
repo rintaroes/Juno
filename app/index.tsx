@@ -1,13 +1,11 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import {
-  HeartHandshake,
-  ImagePlus,
-  MapPinned,
-} from 'lucide-react-native';
+import { ChevronDown, HeartHandshake, ImagePlus, MapPinned } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppDock } from '../components/AppDock';
+import { lookupRegistry } from '../lib/api/registry';
 import { useAuth } from '../providers/AuthProvider';
 import {
   ambientBtn,
@@ -38,9 +37,13 @@ export default function HomeScreen() {
   const { user, signOut } = useAuth();
   const insets = useSafeAreaInsets();
   const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [city, setCity] = useState('');
-  const [nameFocused, setNameFocused] = useState(false);
-  const [cityFocused, setCityFocused] = useState(false);
+  const [showOptional, setShowOptional] = useState(false);
+  const [optState, setOptState] = useState('');
+  const [optZip, setOptZip] = useState('');
+  const [optDob, setOptDob] = useState('');
+  const [verifyLoading, setVerifyLoading] = useState(false);
   const [dbCheck, setDbCheck] = useState<
     'idle' | { ok: true } | { ok: false; message: string }
   >('idle');
@@ -48,15 +51,41 @@ export default function HomeScreen() {
   const dockH = getDockOuterHeight(insets.bottom);
   const topPad = insets.top + spacing.md;
 
-  const onVerify = useCallback(() => {
-    router.push({
-      pathname: '/report',
-      params: {
-        firstName: firstName.trim() || 'Alex Mercer',
-        city: city.trim(),
-      },
-    });
-  }, [firstName, city, router]);
+  const onRunCheck = useCallback(async () => {
+    const fn = firstName.trim();
+    const ln = lastName.trim();
+    const ct = city.trim();
+    if (!fn || !ln) {
+      Alert.alert('Add a name', 'Please enter both first and last name.');
+      return;
+    }
+    if (!user?.id) {
+      Alert.alert('Sign in required', 'Sign in to run a safety check.');
+      return;
+    }
+
+    setVerifyLoading(true);
+    try {
+      const res = await lookupRegistry({
+        name: `${fn} ${ln}`.trim(),
+        city: ct || undefined,
+        state: optState.trim() || undefined,
+        zip: optZip.trim() || undefined,
+        dob: optDob.trim() || undefined,
+      });
+      router.push({
+        pathname: '/registry/result',
+        params: { id: res.registryCheckId },
+      });
+    } catch (e) {
+      Alert.alert(
+        'Check failed',
+        e instanceof Error ? e.message : 'Something went wrong. Try again.',
+      );
+    } finally {
+      setVerifyLoading(false);
+    }
+  }, [city, firstName, lastName, optDob, optState, optZip, router, user?.id]);
 
   const onUploadPress = useCallback(() => {
     console.log('upload screenshot tap');
@@ -69,7 +98,6 @@ export default function HomeScreen() {
   }, [signOut]);
 
   useEffect(() => {
-    // Removed eager dev DB smoke queries to avoid noisy network timeouts on weak links.
     setDbCheck('idle');
   }, []);
 
@@ -91,14 +119,8 @@ export default function HomeScreen() {
       >
         <View style={styles.column}>
           <Text style={styles.brand}>Juno</Text>
-          <Text style={styles.signedInAs}>
-            Signed in as {user?.email ?? 'unknown user'}
-          </Text>
 
-          <Text
-            accessibilityRole="header"
-            style={styles.heroTitle}
-          >
+          <Text accessibilityRole="header" style={styles.heroTitle}>
             Safety Check
           </Text>
 
@@ -114,72 +136,127 @@ export default function HomeScreen() {
             <View style={styles.uploadIconWrap}>
               <ImagePlus color={colors.primary} size={27} strokeWidth={2} />
             </View>
-            <Text style={styles.uploadTitle}>Upload Screenshot</Text>
-            <Text style={styles.uploadHint}>PNG or JPG up to 10MB</Text>
+            <Text style={styles.uploadTitle}>Upload screenshot</Text>
+            <Text style={styles.uploadHint}>Optional · PNG or JPG up to 10MB</Text>
           </Pressable>
 
-          <View style={styles.fieldBlock}>
-            <Text
-              accessibilityElementsHidden
-              importantForAccessibility="no"
-              nativeID="labelFirstName"
-              style={styles.label}
-            >
-              First name
-            </Text>
-            <TextInput
-              accessibilityLabelledBy="labelFirstName"
-              value={firstName}
-              onChangeText={setFirstName}
-              placeholder="e.g. Alex"
-              placeholderTextColor={colors.tertiary}
-              onFocus={() => {
-                setNameFocused(true);
-              }}
-              onBlur={() => {
-                setNameFocused(false);
-              }}
-              style={[
-                styles.input,
-                nameFocused && styles.inputFocused,
-              ]}
-            />
+          <View style={[styles.formCard, ambientCard]}>
+            <View style={styles.nameRow}>
+              <View style={styles.nameHalf}>
+                <Text nativeID="labelFirst" style={styles.fieldLabel}>
+                  First name
+                </Text>
+                <TextInput
+                  accessibilityLabelledBy="labelFirst"
+                  value={firstName}
+                  onChangeText={setFirstName}
+                  placeholder="Alex"
+                  placeholderTextColor={colors.tertiary}
+                  autoCapitalize="words"
+                  style={styles.fieldInput}
+                />
+              </View>
+              <View style={styles.nameHalf}>
+                <Text nativeID="labelLast" style={styles.fieldLabel}>
+                  Last name
+                </Text>
+                <TextInput
+                  accessibilityLabelledBy="labelLast"
+                  value={lastName}
+                  onChangeText={setLastName}
+                  placeholder="Mercer"
+                  placeholderTextColor={colors.tertiary}
+                  autoCapitalize="words"
+                  style={styles.fieldInput}
+                />
+              </View>
+            </View>
 
-            <Text nativeID="labelCity" style={[styles.label, styles.labelSpaced]}>
-              City or neighborhood
+            <Text nativeID="labelCity" style={[styles.fieldLabel, styles.labelSpaced]}>
+              City or neighborhood (optional)
             </Text>
-            <View style={styles.inputWrap}>
-              <View style={styles.inputIcon} pointerEvents="none">
-                <MapPinned color={colors.tertiary} size={22} strokeWidth={2} />
+            <View style={styles.cityWrap}>
+              <View style={styles.cityIcon} pointerEvents="none">
+                <MapPinned color={colors.tertiary} size={20} strokeWidth={2} />
               </View>
               <TextInput
                 accessibilityLabelledBy="labelCity"
                 value={city}
                 onChangeText={setCity}
-                placeholder="e.g. Brooklyn"
+                placeholder="Brooklyn"
                 placeholderTextColor={colors.tertiary}
-                onFocus={() => {
-                  setCityFocused(true);
-                }}
-                onBlur={() => {
-                  setCityFocused(false);
-                }}
-                style={[
-                  styles.input,
-                  styles.inputWithIcon,
-                  cityFocused && styles.inputFocused,
-                ]}
+                style={[styles.fieldInput, styles.cityInput]}
               />
             </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showOptional }}
+              onPress={() => setShowOptional((v) => !v)}
+              style={({ pressed }) => [styles.optionalToggle, pressed && styles.pressed]}
+            >
+              <Text style={styles.optionalToggleLabel}>More to narrow results</Text>
+              <ChevronDown
+                color={colors.onSurfaceVariant}
+                size={20}
+                strokeWidth={2}
+                style={{
+                  transform: [{ rotate: showOptional ? '180deg' : '0deg' }],
+                }}
+              />
+            </Pressable>
+
+            {showOptional ? (
+              <View style={styles.optionalBlock}>
+                <Text nativeID="labelState" style={styles.fieldLabel}>
+                  State (optional)
+                </Text>
+                <TextInput
+                  accessibilityLabelledBy="labelState"
+                  value={optState}
+                  onChangeText={(t) => setOptState(t.toUpperCase())}
+                  placeholder="NY"
+                  placeholderTextColor={colors.tertiary}
+                  maxLength={2}
+                  autoCapitalize="characters"
+                  style={styles.fieldInput}
+                />
+                <Text nativeID="labelZip" style={[styles.fieldLabel, styles.labelSpaced]}>
+                  ZIP (optional)
+                </Text>
+                <TextInput
+                  accessibilityLabelledBy="labelZip"
+                  value={optZip}
+                  onChangeText={setOptZip}
+                  placeholder="11201"
+                  placeholderTextColor={colors.tertiary}
+                  keyboardType="number-pad"
+                  style={styles.fieldInput}
+                />
+                <Text nativeID="labelDob" style={[styles.fieldLabel, styles.labelSpaced]}>
+                  Date of birth (optional)
+                </Text>
+                <TextInput
+                  accessibilityLabelledBy="labelDob"
+                  value={optDob}
+                  onChangeText={setOptDob}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.tertiary}
+                  style={styles.fieldInput}
+                />
+              </View>
+            ) : null}
           </View>
 
           <Pressable
             accessibilityRole="button"
-            onPress={onVerify}
+            disabled={verifyLoading}
+            onPress={() => void onRunCheck()}
             style={({ pressed }) => [
               styles.gradientOuter,
               ambientBtn,
               pressed && styles.gradientPressed,
+              verifyLoading && styles.gradientDisabled,
             ]}
           >
             <LinearGradient
@@ -188,18 +265,19 @@ export default function HomeScreen() {
               end={{ x: 0.5, y: 1 }}
               style={styles.gradientInner}
             >
-              <HeartHandshake
-                color={colors.onPrimary}
-                size={21}
-                strokeWidth={2}
-              />
-              <Text style={styles.verifyLabel}>Verify Profile</Text>
+              {verifyLoading ? (
+                <ActivityIndicator color={colors.onPrimary} />
+              ) : (
+                <>
+                  <HeartHandshake color={colors.onPrimary} size={21} strokeWidth={2} />
+                  <Text style={styles.verifyLabel}>Run safety check</Text>
+                </>
+              )}
             </LinearGradient>
           </Pressable>
 
           <Text style={styles.disclaimer}>
-            Searches are completely anonymous. We never notify the person you
-            are searching.
+            Registry results may include similar names. We never notify the person you search.
           </Text>
 
           {__DEV__ && dbCheck !== 'idle' ? (
@@ -239,7 +317,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 448,
     alignItems: 'center',
-    gap: 20,
+    gap: spacing.lg,
   },
   brand: {
     fontFamily: fontFamily.extraBold,
@@ -248,13 +326,6 @@ const styles = StyleSheet.create({
     color: colors.indigo500,
     letterSpacing: -0.35,
     marginBottom: spacing.xs,
-  },
-  signedInAs: {
-    fontFamily: fontFamily.regular,
-    fontSize: typeScale.labelSm,
-    lineHeight: lineHeight(typeScale.labelSm, 1.35),
-    color: colors.tertiary,
-    marginTop: -spacing.xs,
   },
   heroTitle: {
     fontFamily: fontFamily.bold,
@@ -274,14 +345,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.primaryFixed,
     borderStyle: 'dashed',
-    paddingVertical: 28,
+    paddingVertical: 24,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
     gap: spacing.sm,
   },
   uploadIconWrap: {
-    width: 56,
-    height: 56,
+    width: 52,
+    height: 52,
     borderRadius: radii.full,
     backgroundColor: colors.primaryFixed,
     alignItems: 'center',
@@ -301,57 +372,79 @@ const styles = StyleSheet.create({
     color: colors.tertiary,
     textAlign: 'center',
   },
-  fieldBlock: {
+  formCard: {
     width: '100%',
     maxWidth: 400,
     alignSelf: 'center',
-    gap: 6,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
   },
-  label: {
-    alignSelf: 'stretch',
-    textAlign: 'center',
+  nameRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  nameHalf: {
+    flex: 1,
+    minWidth: 0,
+  },
+  fieldLabel: {
     fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelMd,
-    lineHeight: lineHeight(typeScale.labelMd, 1.43),
-    letterSpacing: 0.14,
+    fontSize: typeScale.labelSm,
+    letterSpacing: 0.12,
     color: colors.onSurfaceVariant,
-    marginBottom: spacing.xs,
+    marginBottom: 6,
   },
   labelSpaced: {
-    marginTop: spacing.sm,
+    marginTop: spacing.md,
   },
-  inputWrap: {
-    position: 'relative',
+  fieldInput: {
     width: '100%',
-  },
-  inputIcon: {
-    position: 'absolute',
-    left: spacing.lg,
-    top: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    zIndex: 1,
-  },
-  input: {
-    width: '100%',
-    minHeight: 50,
-    borderRadius: radii.input,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: 13,
+    minHeight: 48,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
     fontFamily: fontFamily.regular,
     fontSize: typeScale.bodyMd,
-    lineHeight: lineHeight(typeScale.bodyMd, 1.5),
     color: colors.onSurface,
     backgroundColor: tertiaryFieldBg,
     borderWidth: 1,
     borderColor: 'transparent',
   },
-  inputWithIcon: {
-    paddingLeft: 56,
+  cityWrap: {
+    position: 'relative',
+    width: '100%',
   },
-  inputFocused: {
-    borderColor: colors.primary,
-    backgroundColor: colors.surfaceContainerLowest,
+  cityIcon: {
+    position: 'absolute',
+    left: 14,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  cityInput: {
+    paddingLeft: 44,
+  },
+  optionalToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  optionalToggleLabel: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelMd,
+    color: colors.primary,
+  },
+  optionalBlock: {
+    marginTop: spacing.xs,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.outlineVariant,
   },
   gradientOuter: {
     width: '100%',
@@ -359,7 +452,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     borderRadius: radii.full,
     overflow: 'hidden',
-    marginTop: spacing.sm,
   },
   gradientInner: {
     flexDirection: 'row',
@@ -373,6 +465,9 @@ const styles = StyleSheet.create({
     opacity: 0.94,
     transform: [{ scale: 0.98 }],
   },
+  gradientDisabled: {
+    opacity: 0.72,
+  },
   verifyLabel: {
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.bodyLg,
@@ -385,10 +480,9 @@ const styles = StyleSheet.create({
     lineHeight: lineHeight(typeScale.labelSm, 1.35),
     color: colors.tertiary,
     textAlign: 'center',
-    maxWidth: 300,
+    maxWidth: 320,
     alignSelf: 'center',
-    opacity: 0.7,
-    marginTop: spacing.sm,
+    opacity: 0.75,
     paddingHorizontal: spacing.sm,
   },
   dbSmoke: {

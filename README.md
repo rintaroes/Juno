@@ -13,22 +13,23 @@ This document is the **source of truth for technical implementation** of the cur
 **What exists in this repository today:**
 
 - **Expo SDK 54** app with **Expo Router** (`expo-router/entry`).
-- **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 are complete**, and **Phase 4 (chat screenshot OCR + AI summary)** is now implemented out of order ahead of Phases 2/3.
-- **Home route (`/`)** — “**Safety Check**” screen (requires sign-in): centered **Juno** wordmark, **signed in as** email line, **Sign out**, Material-inspired UI (Plus Jakarta Sans, purple / M3-style tokens), dashed **upload screenshot** card (tap → `console.log` only), **first name** + **city** text fields, **Verify Profile** gradient CTA — navigates to **`/report`** with `firstName` / `city` query params (defaults applied when empty). In **`__DEV__`**, a one-line **Supabase** smoke line under the disclaimer tests `profiles` `select` (RLS must allow the signed-in user). Disclaimer copy.
+- **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 + Phase 2 + Phase 4** are implemented in this repo (Phase 4 was built before Phase 2; order in `JUNO_MVP.md` may differ).
+- **Home route (`/`)** — “**Safety Check**” (requires sign-in): **Juno** wordmark, dashed **upload screenshot** card (optional; still stubbed — `console.log` only), a single form card with **first name**, **last name**, **city** (optional), collapsible **more** (state, ZIP, DOB), **Run safety check** gradient CTA — calls Supabase Edge Function **`lookup-registry`** (Offenders.io on the server), then opens **`/registry/result`** with the saved `registry_checks` id. **Sign out** and disclaimer copy. No “signed in as” line on this screen.
 - **Map route (`/map`)** — **`react-native-maps`** roadmap centered on Seattle, **Google-style light map JSON** on Android (`PROVIDER_GOOGLE`); iOS uses Apple Maps. **No top header** (full-bleed map under status bar); **glass search bar** (placeholder: “Find family, friends, or places…”) + mic stub; **custom markers** (initials on discs + status pill + tail); **people bottom sheet** (rows sorted with **date status first**; initials + corner status icon). Pins / search / mic / rows log to `console.log` for now.
-- **Report route (`/report`)** — **Background check** result UI after verify: centered Juno, back to Protect, summary card with **initials avatar** (no photos), verification rows (identity, **sex offender registry** copy, collapsible **social links** stub), disclaimer, large **Share report with Circle** CTA. **Share** opens a **bottom sheet** with dark **blur + dim scrim**, **“Share with Circle”** header, **N Selected** pill, horizontal **circle member** strip (initials-only avatars, gradient ring when selected, **Add** stub), **Cancel** / **Share** (native share sheet with chosen names — stub).
+- **Report route (`/report`)** — **Legacy / demo** “background check” UI (initials avatar, verification copy, share-with-circle sheet). **Not** the primary path from **`/`** today; the live registry flow is **`/` → `/registry/result`**.
 - **Auth route (`/auth`)** — email/password **sign in** and **sign up** (`signInWithPassword` / `signUp`); bouncy `ScrollView` + `KeyboardAvoidingView` so primary actions stay reachable when the keyboard is open.
 - **Shared `AppDock`** — `components/AppDock.tsx`: **Protect · Roster · Map · Circles**; Protect ↔ `/`, Roster ↔ `/roster`, Map ↔ `/map` via `router.replace` (instant transition: root **`Stack`** uses **`animation: 'none'`**); Circles remains a stub.
-- **Roster routes** (all protected): **`/roster`** list with empty states + archived filter, **`/roster/add`** manual add flow, and **`/roster/[id]`** person profile with notes and edit/delete/archive actions.
+- **Roster routes** (all protected): **`/roster`** list with empty states + archived filter, **`/roster/add`** manual add flow, and **`/roster/[id]`** person profile with notes, edit/delete/archive, **registry check** history + link to **`/registry/lookup`**, and **Phase 4** chat screenshot upload + summaries.
+- **Registry routes** (protected): **`/registry/lookup`** (standalone lookup, optional `rosterPersonId` when opened from a person), **`/registry/result`** — Offenders.io-backed matches (photos sorted first; tap photo for full-screen), **Save to roster** / **merge into existing person**.
 - **Global design tokens** under `/theme` (colors, typography, spacing, radii, layout, shadows, **`mapGoogleStyle.ts`** for map JSON, **`getDockOuterHeight()`** for layout math). **`theme/shadows.ts`** tints use **`colors`** (e.g. primary / primaryContainer) instead of hardcoded purple hex where applicable.
 - **Font loading + splash** in `app/_layout.tsx` (Plus Jakarta Sans via `@expo-google-fonts/plus-jakarta-sans`).
 
 **Not in this repo yet (typical next steps):**
 
-- Registry lookup and reverse image lookup flows (Phases 2/3).
+- Reverse image lookup (Phase 3) and remaining MVP phases.
 - More dock routes (Circles as real screens), push notifications, subscriptions.
 
-**Current status:** **Phase 0 + Phase 1 complete**, plus **Phase 4 chat screenshot flow**. Supabase now includes **`public.chat_uploads`** and a private **`chat-screenshots`** storage bucket with owner-scoped policies; deployed edge function **`summarize-chat-screenshot`** performs OCR/summary via Anthropic using `ANTHROPIC_API_KEY`. The roster person profile now supports screenshot upload and displays summary/opening-line/red-flag/green-flag results.
+**Current status:** **Phase 0 + Phase 1 + Phase 2 + Phase 4**. Supabase includes **`public.registry_checks`** (RLS select/update by owner), **`public.chat_uploads`**, private **`chat-screenshots`** storage; Edge Functions **`lookup-registry`** (Offenders.io registry search + DB row) and **`summarize-chat-screenshot`** (Anthropic OCR/summary). Home **Run safety check** persists a row and shows real matches on **`/registry/result`**.
 
 ### Phase 0 checklist (aligned to `JUNO_MVP.md` §8)
 
@@ -44,6 +45,18 @@ This document is the **source of truth for technical implementation** of the cur
 | `npm run typecheck` | Done |
 
 **Phase 0 deliverable:** user can sign up, sign in, and land on the in-app home (`/`).
+
+### Phase 2 checklist (registry — aligned to `JUNO_MVP.md` §8)
+
+| Item | Status |
+|------|--------|
+| `registry_checks` table + RLS | Done (migration `phase2_registry_checks`) |
+| `lookup-registry` Edge Function | Done; Offenders.io `GET` + normalize `offenders[]` → app matches |
+| Client `lookupRegistry()` | Done (`lib/api/registry.ts` → `functions.invoke`) |
+| Home → result → save/merge roster | Done (`/`, `/registry/result`, `lib/registryChecks.ts`) |
+| Roster profile: linked checks + “run again” | Done (`/roster/[id]`) |
+
+**Edge secrets (Supabase Dashboard → Edge Functions → Secrets, not Expo):** `REGISTRY_LOOKUP_URL` (e.g. `https://api.offenders.io/sexoffender`), `REGISTRY_LOOKUP_API_KEY`. Optional stub behavior on dev if URL/key unset (function falls back to deterministic demo names).
 
 ---
 
@@ -74,9 +87,13 @@ juno/
 ├── app/
 │   ├── _layout.tsx      # Root layout: fonts, splash, SafeAreaProvider, AuthProvider, route guard
 │   ├── auth.tsx         # Route `/auth` — email/password auth (sign in + sign up)
-│   ├── index.tsx        # Route `/` — Safety Check home UI (protected)
+│   ├── index.tsx        # Route `/` — Safety Check: form + Run safety check → registry
 │   ├── map.tsx          # Route `/map` — family map UI (map + sheet + search)
-│   ├── report.tsx       # Route `/report` — background check result + share sheet
+│   ├── report.tsx       # Route `/report` — demo background-check UI (not wired from `/`)
+│   ├── registry/
+│   │   ├── _layout.tsx  # Registry stack
+│   │   ├── lookup.tsx  # `/registry/lookup` — optional deep link from roster
+│   │   └── result.tsx  # `/registry/result` — matches, photos, save/merge
 │   └── roster/
 │       ├── _layout.tsx  # Roster stack layout
 │       ├── index.tsx    # Route `/roster` list + empty states + archived toggle
@@ -90,12 +107,17 @@ juno/
 │   ├── database.types.ts # Generated Supabase DB types
 │   ├── supabase.ts      # Typed `getSupabase()` + profile upsert helper
 │   ├── roster.ts        # Roster CRUD helpers
+│   ├── api/
+│   │   └── registry.ts  # `lookupRegistry()` → `lookup-registry` Edge Function
+│   ├── registryChecks.ts # Registry check fetch + link to roster person
 │   └── chatUploads.ts   # Chat upload list helper
 ├── providers/
 │   └── AuthProvider.tsx # Session handling + auth state listener
 ├── supabase/
-│   ├── migrations/      # Profiles, roster_people, chat_uploads (+ storage/RLS policies)
+│   ├── migrations/      # Profiles, roster_people, registry_checks, chat_uploads (+ storage/RLS)
 │   └── functions/
+│       ├── lookup-registry/
+│       │   └── index.ts # Edge Function: Offenders.io search + insert `registry_checks`
 │       └── summarize-chat-screenshot/
 │           └── index.ts # Edge Function: OCR + AI summary via Anthropic
 ├── theme/
@@ -123,15 +145,15 @@ juno/
 
 1. **`package.json`** `"main": "expo-router/entry"` boots the router.
 2. **`app/_layout.tsx`** loads fonts, keeps native splash until fonts resolve (or error), then wraps the app in **`SafeAreaProvider`** + **`AuthProvider`**. A root route guard redirects signed-out users to `/auth`, redirects signed-in users away from `/auth`, and renders app-level loading/error states.
-3. **`app/index.tsx`** is the **default route** `/` (home); **`app/roster/index.tsx`** is **`/roster`**; **`app/map.tsx`** is **`/map`**; **`app/report.tsx`** is **`/report`**. All of these (and other non-`/auth` stack routes) are **reachable only with a valid session** unless the route guard is extended later.
+3. **`app/index.tsx`** is the **default route** `/` (home); **`app/roster/index.tsx`** is **`/roster`**; **`app/map.tsx`** is **`/map`**; **`app/report.tsx`** is **`/report`**; **`app/registry/*`** are **`/registry/...`**. All of these (and other non-`/auth` stack routes) are **reachable only with a valid session** unless the route guard is extended later.
 
 ### 4.2 State on the home screen
 
-- **Local React state** only: `firstName`, `city`, focus flags for inputs.
+- **Local React state:** first name, last name, city (optional), optional state / ZIP / DOB, expand toggle, loading for CTA.
 - **Auth** — `useAuth()` for `user` and `signOut`.
-- **Verify Profile** — `router.push({ pathname: '/report', params: { firstName, city } })` (empty name falls back to demo full name in the report screen).
+- **Run safety check** — `lookupRegistry({ name, city?, state?, zip?, dob? })` then `router.push({ pathname: '/registry/result', params: { id: registryCheckId } })`.
 - **Supabase:** auth sessions persist in RN storage; auth state is watched with `onAuthStateChange`; signed-in users are upserted into `profiles` by `id`.
-- **No upload API** — upload and non-routing dock tabs log to the console for now.
+- **Upload card** — still stubbed (`console.log`); non-routing dock tabs log to the console for now.
 
 ### 4.3 Auth screen (`/auth`)
 
@@ -147,15 +169,22 @@ juno/
 
 ### 4.5 Report screen (`/report`)
 
-- **Query params:** `firstName`, `city` (from Safety Check); used for headings and copy only — **stub data** for verification blocks and socials.
+- **Demo / legacy** screen: query params `firstName`, `city` if you navigate here manually; **stub** verification blocks and socials.
 - **Share with Circle** — modal uses **`animationType: 'slide'`**, bottom sheet, **BlurView** + dim overlay; member selection is **local state**; confirm uses **`Share.share`** with a text summary (stub).
 
-### 4.6 Theming
+### 4.6 Registry flow (Phase 2)
+
+- **Server-only vendor calls:** the app never holds Offenders credentials; **`lookup-registry`** uses `REGISTRY_LOOKUP_URL` + `REGISTRY_LOOKUP_API_KEY` and the user JWT.
+- **Request shape:** combined **full name** plus optional **city**, **state** (2-letter expanded to full state name for Offenders), **zip**, **dob**; optional **`rosterPersonId`** when the check is tied to an existing roster person.
+- **Response:** normalized `matches` (name, dob, state, zip, mugshot URL, person UUID); stored in **`registry_checks.raw_result`** and summary columns.
+- **Result UI (`/registry/result`):** matches with photos **first**; circular photo or **placeholder avatar**; tap photo for full-screen preview; **Save to roster** creates/links `roster_people` with `source: 'registry_lookup'`.
+
+### 4.7 Theming
 
 - Visuals follow the **Aura / Material-style** token set in `theme/colors.ts` (e.g. `primary`, `surfaceBright`, `secondaryContainer`, dock indigo accents).
 - **Shadows** are defined in `theme/shadows.ts` with iOS `shadow*` and Android `elevation` where applicable, referencing **`colors`** for tint.
 
-### 4.7 Chat screenshot AI flow (Phase 4)
+### 4.8 Chat screenshot AI flow (Phase 4)
 
 - User opens **`/roster/[id]`** and taps **Add Chat Screenshot**.
 - App picks an image via `expo-image-picker`, uploads bytes to private bucket **`chat-screenshots`** at `{userId}/{rosterPersonId}/{timestamp}.{ext}`.
@@ -170,12 +199,14 @@ juno/
 | Path | File | Purpose |
 |------|------|---------|
 | `/auth` | `app/auth.tsx` | Email/password auth (sign in + sign up); public when signed out |
-| `/` | `app/index.tsx` | Safety Check home (protected) |
+| `/` | `app/index.tsx` | Safety Check home → registry lookup + navigate to result (protected) |
 | `/roster` | `app/roster/index.tsx` | Roster list + empty states + archived toggle (protected) |
 | `/roster/add` | `app/roster/add.tsx` | Manual Add Person flow (protected) |
-| `/roster/[id]` | `app/roster/[id].tsx` | Person profile edit + notes + archive/delete (protected) |
+| `/roster/[id]` | `app/roster/[id].tsx` | Person profile + registry checks + chat uploads + archive/delete (protected) |
 | `/map` | `app/map.tsx` | Circle / family map (protected) |
-| `/report` | `app/report.tsx` | Background check result + share-with-circle sheet (protected) |
+| `/registry/lookup` | `app/registry/lookup.tsx` | Standalone registry form (e.g. from roster deep link) (protected) |
+| `/registry/result` | `app/registry/result.tsx` | Registry matches + save/merge to roster (protected) |
+| `/report` | `app/report.tsx` | Demo background-check UI + share sheet (protected; not used from `/`) |
 
 Add new routes as `app/<segment>.tsx` or `app/<folder>/index.tsx` per [Expo Router conventions](https://docs.expo.dev/router/introduction/).
 
@@ -206,10 +237,12 @@ Then press `i` / `a` / scan QR for device. Use **`npx expo start -c`** if Metro 
 
 **Environment variables**
 
-- Copy **`.env.example`** → **`.env`** in the repo root (`.env` is gitignored).
+- Copy **`.env.example`** → **`.env`** in the repo root (`.env` is gitignored). **Expo does not load `.env.example`** — without a real **`.env`**, `getSupabase()` will throw at runtime.
 - **Expo** loads **`EXPO_PUBLIC_*`** into the JS bundle — use these for the Supabase browser/RN client.
 - **Where to get values:** Supabase Dashboard → **Project Settings** → **API**: **Project URL** → `EXPO_PUBLIC_SUPABASE_URL`; **anon public** (legacy JWT) or **publishable** key → `EXPO_PUBLIC_SUPABASE_ANON_KEY` (both work with `createClient` today).
-- **Do not place provider secrets in Expo env**: keep Anthropic/API secrets server-side in Supabase Edge Function secrets (`ANTHROPIC_API_KEY`, optional `ANTHROPIC_VISION_MODEL`, `ANTHROPIC_TEXT_MODEL`).
+- **Do not place provider secrets in Expo env:** keep them in **Supabase Edge Function secrets** only:
+  - **`summarize-chat-screenshot`:** `ANTHROPIC_API_KEY`, optional `ANTHROPIC_VISION_MODEL`, `ANTHROPIC_TEXT_MODEL`.
+  - **`lookup-registry`:** `REGISTRY_LOOKUP_URL` (e.g. `https://api.offenders.io/sexoffender`), `REGISTRY_LOOKUP_API_KEY` (Offenders.io key; sent as `key` query param per their API).
 - **Postgres connection string** (`postgresql://…`, used by **Prisma**, scripts, or `psql`): Dashboard → **Project Settings** → **Database** → **Connection string** (URI). Prefer the **pooler** URI for serverless/tooling if you hit connection limits. **Do not** put `DATABASE_URL` in the mobile app — only in local tooling or a private server.
 - **Prisma vs Supabase-only:** For this Expo app, the “backend” is normally **Supabase Postgres + RLS + PostgREST**, accessed only via **`@supabase/supabase-js`** from the client. Add **Prisma** only if you want a **separate Node** service or migration CLI talking to Postgres over `DATABASE_URL`; it is not installed in this repo by default (avoids duplicating schema between Prisma and Supabase migrations).
 
@@ -239,21 +272,20 @@ Use **`npm run typecheck`** (or `npx tsc --noEmit`) before merging changes that 
 
 ## 9) Known Gaps and Planned Work
 
-1. **Phase 2 (next, `JUNO_MVP.md`)** — Registry lookup form + Edge Function + result persistence (`registry_checks`) + save/merge into roster.
-2. **Backend APIs** — Additional Edge Functions and integrations for Phase 2/3/5+.
-3. **Safety Check** — Wire upload to real verification pipeline; home upload card is still stubbed.
-4. **Navigation** — Implement dock routes (Circles, Chat) as real screens or stacks; replace `console.log` stubs.
-5. **Product flows** — Date mode, live circle map data, notifications, vault/history — stubs only today.
-6. **Unused font packages** — Remove `@expo-google-fonts/fraunces` / `inter` or load them in `_layout` if design requires.
-7. **Tests** — No unit/e2e suite yet; add Detox / Maestro / Jest as the app grows.
-8. **CI** — No pipeline documented; add when publishing builds (EAS).
+1. **Phase 3 (`JUNO_MVP.md`)** — Reverse image search + storage + Edge Function + roster save.
+2. **Safety Check upload** — Wire dashed upload card to a real pipeline (OCR / chat flow or separate product path); still stubbed on **`/`**.
+3. **Navigation** — Implement dock routes (Circles, Chat) as real screens or stacks; replace `console.log` stubs.
+4. **Product flows** — Date mode, live circle map data, notifications, vault/history — stubs only today.
+5. **Unused font packages** — Remove `@expo-google-fonts/fraunces` / `inter` or load them in `_layout` if design requires.
+6. **Tests** — No unit/e2e suite yet; add Detox / Maestro / Jest as the app grows.
+7. **CI** — No pipeline documented; add when publishing builds (EAS).
 
 ---
 
 ## 10) Product and Compliance Notes (placeholder)
 
-- Copy on the Safety Check screen includes **anonymous search** messaging — ensure marketing and legal review before production.
-- Any future **background check** or **people search** feature must match actual data sources, retention, and jurisdiction — update this README and in-app disclaimers when behavior is real.
+- Copy on the Safety Check / registry result screens includes **non-notification** and **possible-match / similar-name** messaging — ensure marketing and legal review before production.
+- **Offenders.io** (or any registry vendor) is a third-party data source; retention and accuracy follow their terms and the underlying registries — keep disclaimers aligned with counsel.
 
 ---
 
@@ -272,4 +304,4 @@ This is a **living specification**. If a change affects runtime behavior, data s
 
 ---
 
-*Last aligned to repo: Phase 0 + Phase 1 complete, plus Phase 4 chat screenshot OCR/summary (`chat_uploads`, `chat-screenshots`, `summarize-chat-screenshot`), protected routes, roster stack, and typed Supabase helpers.*
+*Last aligned to repo: Phase 0 + Phase 1 + Phase 2 (registry: `registry_checks`, `lookup-registry`, `/registry/*`, `lib/api/registry.ts`) + Phase 4 (chat uploads + `summarize-chat-screenshot`), Safety Check home wired to real registry results, typed Supabase helpers.*
