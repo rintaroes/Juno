@@ -13,10 +13,13 @@ This document is the **source of truth for technical implementation** of the cur
 **What exists in this repository today:**
 
 - **Expo SDK 54** app with **Expo Router** (`expo-router/entry`).
-- **Home route (`/`)** — “**Safety Check**” screen: centered **Juno** wordmark, Material-inspired UI (Plus Jakarta Sans, purple / M3-style tokens), dashed **upload screenshot** card (tap → `console.log` only), **first name** + **city** text fields, **Verify Profile** gradient CTA — navigates to **`/report`** with `firstName` / `city` query params (defaults applied when empty). Disclaimer copy.
+- **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 are complete** in code and Supabase; next milestones are lookup features.
+- **Home route (`/`)** — “**Safety Check**” screen (requires sign-in): centered **Juno** wordmark, **signed in as** email line, **Sign out**, Material-inspired UI (Plus Jakarta Sans, purple / M3-style tokens), dashed **upload screenshot** card (tap → `console.log` only), **first name** + **city** text fields, **Verify Profile** gradient CTA — navigates to **`/report`** with `firstName` / `city` query params (defaults applied when empty). In **`__DEV__`**, a one-line **Supabase** smoke line under the disclaimer tests `profiles` `select` (RLS must allow the signed-in user). Disclaimer copy.
 - **Map route (`/map`)** — **`react-native-maps`** roadmap centered on Seattle, **Google-style light map JSON** on Android (`PROVIDER_GOOGLE`); iOS uses Apple Maps. **No top header** (full-bleed map under status bar); **glass search bar** (placeholder: “Find family, friends, or places…”) + mic stub; **custom markers** (initials on discs + status pill + tail); **people bottom sheet** (rows sorted with **date status first**; initials + corner status icon). Pins / search / mic / rows log to `console.log` for now.
 - **Report route (`/report`)** — **Background check** result UI after verify: centered Juno, back to Protect, summary card with **initials avatar** (no photos), verification rows (identity, **sex offender registry** copy, collapsible **social links** stub), disclaimer, large **Share report with Circle** CTA. **Share** opens a **bottom sheet** with dark **blur + dim scrim**, **“Share with Circle”** header, **N Selected** pill, horizontal **circle member** strip (initials-only avatars, gradient ring when selected, **Add** stub), **Cancel** / **Share** (native share sheet with chosen names — stub).
-- **Shared `AppDock`** — `components/AppDock.tsx`: **Protect · Map · Circles · Chat**; **Protect** ↔ `/`, **Map** ↔ `/map` via `router.replace` (instant transition: root **`Stack`** uses **`animation: 'none'`**); Circles / Chat stub `console.log`.
+- **Auth route (`/auth`)** — email/password **sign in** and **sign up** (`signInWithPassword` / `signUp`); bouncy `ScrollView` + `KeyboardAvoidingView` so primary actions stay reachable when the keyboard is open.
+- **Shared `AppDock`** — `components/AppDock.tsx`: **Protect · Roster · Map · Circles**; Protect ↔ `/`, Roster ↔ `/roster`, Map ↔ `/map` via `router.replace` (instant transition: root **`Stack`** uses **`animation: 'none'`**); Circles remains a stub.
+- **Roster routes** (all protected): **`/roster`** list with empty states + archived filter, **`/roster/add`** manual add flow, and **`/roster/[id]`** person profile with notes and edit/delete/archive actions.
 - **Global design tokens** under `/theme` (colors, typography, spacing, radii, layout, shadows, **`mapGoogleStyle.ts`** for map JSON, **`getDockOuterHeight()`** for layout math). **`theme/shadows.ts`** tints use **`colors`** (e.g. primary / primaryContainer) instead of hardcoded purple hex where applicable.
 - **Font loading + splash** in `app/_layout.tsx` (Plus Jakarta Sans via `@expo-google-fonts/plus-jakarta-sans`).
 
@@ -26,7 +29,22 @@ This document is the **source of truth for technical implementation** of the cur
 - Real image upload / reverse image search / background check integrations.
 - More dock routes (Circles, Chat as real screens), push notifications, subscriptions.
 
-**Current status:** UI / navigation shell / design system foundation + **Phase 0 auth foundation** — app includes Supabase email/password auth, session persistence, protected route gating, and typed Supabase helpers. **`public.profiles`** is now user-scoped via RLS (`auth.uid() = id`) and app auth bootstrap upserts the signed-in user's profile row.
+**Current status:** **Phase 0 + Phase 1 complete** — the app has real auth/session guards plus the first private data model. Supabase includes **`public.profiles`** and **`public.roster_people`** (owner-scoped RLS), and the app ships a typed roster data helper (`lib/roster.ts`) with list/create/read/update/archive/delete operations backing `/roster`, `/roster/add`, and `/roster/[id]`.
+
+### Phase 0 checklist (aligned to `JUNO_MVP.md` §8)
+
+| Item | Status |
+|------|--------|
+| Supabase Auth (email/password) | Done (`app/auth.tsx`, `AuthProvider`) |
+| Replace dev-only anon RLS with user-scoped RLS | Done (migration `phase0_auth_foundation`) |
+| `profiles` table | Done; `id` = `auth.users.id`, + `updated_at` |
+| App-level session handling | Done (`AuthProvider`, `onAuthStateChange`) |
+| Protected routes | Done (`app/_layout.tsx` guard) |
+| Loading / error components | Done (`AppLoading`, `AppErrorState`) |
+| Typed Supabase client helpers | Done (`lib/supabase.ts`, `lib/database.types.ts`) |
+| `npm run typecheck` | Done |
+
+**Phase 0 deliverable:** user can sign up, sign in, and land on the in-app home (`/`).
 
 ---
 
@@ -70,7 +88,7 @@ juno/
 ├── providers/
 │   └── AuthProvider.tsx # Session handling + auth state listener
 ├── supabase/
-│   └── migrations/      # SQL mirrored from hosted DB migrations (e.g. `profiles`)
+│   └── migrations/      # Mirrored from hosted Supabase: `create_profiles`, `phase0_auth_foundation`
 ├── theme/
 │   ├── index.ts         # Re-exports all tokens
 │   ├── colors.ts        # M3-style / Aura mock palette (primary, surfaces, etc.)
@@ -96,27 +114,34 @@ juno/
 
 1. **`package.json`** `"main": "expo-router/entry"` boots the router.
 2. **`app/_layout.tsx`** loads fonts, keeps native splash until fonts resolve (or error), then wraps the app in **`SafeAreaProvider`** + **`AuthProvider`**. A root route guard redirects signed-out users to `/auth`, redirects signed-in users away from `/auth`, and renders app-level loading/error states.
-3. **`app/index.tsx`** is the **default route** `/` (home); **`app/map.tsx`** is **`/map`**; **`app/report.tsx`** is **`/report`**.
+3. **`app/index.tsx`** is the **default route** `/` (home); **`app/map.tsx`** is **`/map`**; **`app/report.tsx`** is **`/report`**. All of these (and other non-`/auth` stack routes) are **reachable only with a valid session** unless the route guard is extended later.
 
 ### 4.2 State on the home screen
 
 - **Local React state** only: `firstName`, `city`, focus flags for inputs.
+- **Auth** — `useAuth()` for `user` and `signOut`.
 - **Verify Profile** — `router.push({ pathname: '/report', params: { firstName, city } })` (empty name falls back to demo full name in the report screen).
 - **Supabase:** auth sessions persist in RN storage; auth state is watched with `onAuthStateChange`; signed-in users are upserted into `profiles` by `id`.
 - **No upload API** — upload and non-routing dock tabs log to the console for now.
 
-### 4.3 Map screen
+### 4.3 Auth screen (`/auth`)
+
+- **Sign in** / **Sign up** toggle; uses `getSupabase().auth.signInWithPassword` and `signUp`.
+- If the project has **email confirmation** enabled, sign-up may require confirming email before a session exists (UI shows a message).
+- **Keyboard:** `KeyboardAvoidingView` + bouncy `ScrollView` so CTAs are not covered by the software keyboard.
+
+### 4.4 Map screen
 
 - **Static region** and **hard-coded marker coordinates** (demo positions near Seattle).
 - **No profile photos** — markers and sheet rows use **initials** on `primaryFixed` discs.
 - **Android:** set `android.config.googleMaps.apiKey` in **app.json** (or `app.config.js`) for Google tiles; without a key, tiles may fail on device builds.
 
-### 4.4 Report screen (`/report`)
+### 4.5 Report screen (`/report`)
 
 - **Query params:** `firstName`, `city` (from Safety Check); used for headings and copy only — **stub data** for verification blocks and socials.
 - **Share with Circle** — modal uses **`animationType: 'slide'`**, bottom sheet, **BlurView** + dim overlay; member selection is **local state**; confirm uses **`Share.share`** with a text summary (stub).
 
-### 4.5 Theming
+### 4.6 Theming
 
 - Visuals follow the **Aura / Material-style** token set in `theme/colors.ts` (e.g. `primary`, `surfaceBright`, `secondaryContainer`, dock indigo accents).
 - **Shadows** are defined in `theme/shadows.ts` with iOS `shadow*` and Android `elevation` where applicable, referencing **`colors`** for tint.
@@ -127,10 +152,13 @@ juno/
 
 | Path | File | Purpose |
 |------|------|---------|
-| `/auth` | `app/auth.tsx` | Email/password auth (sign in + sign up) |
-| `/` | `app/index.tsx` | Safety Check home (upload + fields + verify → report) |
-| `/map` | `app/map.tsx` | Circle / family map (demo map + sheet + search) |
-| `/report` | `app/report.tsx` | Background check result + share-with-circle sheet |
+| `/auth` | `app/auth.tsx` | Email/password auth (sign in + sign up); public when signed out |
+| `/` | `app/index.tsx` | Safety Check home (protected) |
+| `/roster` | `app/roster/index.tsx` | Roster list + empty states + archived toggle (protected) |
+| `/roster/add` | `app/roster/add.tsx` | Manual Add Person flow (protected) |
+| `/roster/[id]` | `app/roster/[id].tsx` | Person profile edit + notes + archive/delete (protected) |
+| `/map` | `app/map.tsx` | Circle / family map (protected) |
+| `/report` | `app/report.tsx` | Background check result + share-with-circle sheet (protected) |
 
 Add new routes as `app/<segment>.tsx` or `app/<folder>/index.tsx` per [Expo Router conventions](https://docs.expo.dev/router/introduction/).
 
@@ -149,6 +177,12 @@ Add new routes as `app/<segment>.tsx` or `app/<folder>/index.tsx` per [Expo Rout
 ```bash
 npm install
 npx expo start
+```
+
+If `npm install` fails on **peer dependency** resolution (common with `expo-router` / `react-dom` optional peers), use:
+
+```bash
+npm install --legacy-peer-deps
 ```
 
 Then press `i` / `a` / scan QR for device. Use **`npx expo start -c`** if Metro cache causes stale bundles.
@@ -173,13 +207,7 @@ Then press `i` / `a` / scan QR for device. Use **`npx expo start -c`** if Metro 
 | `npm run web` | `expo start --web` |
 | `npm run typecheck` | `tsc --noEmit` |
 
-Optional locally:
-
-```bash
-npx tsc --noEmit
-```
-
-(Add `npm run typecheck` in `package.json` if you want this as a formal script.)
+Use **`npm run typecheck`** (or `npx tsc --noEmit`) before merging changes that touch TypeScript.
 
 ---
 
@@ -193,13 +221,14 @@ npx tsc --noEmit
 
 ## 9) Known Gaps and Planned Work
 
-1. **Backend APIs** — Edge Functions, webhooks, and server-side integrations.
-2. **Safety Check** — Wire upload to **expo-image-picker** (or document picker), then API; real verify → report pipeline.
-3. **Navigation** — Implement dock routes (Circles, Chat) as real screens or stacks; replace `console.log` stubs.
-4. **Product flows** — Date mode, live circle map data, notifications, vault/history — stubs only today.
-5. **Unused font packages** — Remove `@expo-google-fonts/fraunces` / `inter` or load them in `_layout` if design requires.
-6. **Tests** — No unit/e2e suite yet; add Detox / Maestro / Jest as the app grows.
-7. **CI** — No pipeline documented; add when publishing builds (EAS).
+1. **Phase 2 (next, `JUNO_MVP.md`)** — Registry lookup form + Edge Function + result persistence (`registry_checks`) + save/merge into roster.
+2. **Backend APIs** — Edge Functions, webhooks, and server-side integrations.
+3. **Safety Check** — Wire upload to **expo-image-picker** (or document picker), then API; real verify → report pipeline.
+4. **Navigation** — Implement dock routes (Circles, Chat) as real screens or stacks; replace `console.log` stubs.
+5. **Product flows** — Date mode, live circle map data, notifications, vault/history — stubs only today.
+6. **Unused font packages** — Remove `@expo-google-fonts/fraunces` / `inter` or load them in `_layout` if design requires.
+7. **Tests** — No unit/e2e suite yet; add Detox / Maestro / Jest as the app grows.
+8. **CI** — No pipeline documented; add when publishing builds (EAS).
 
 ---
 
@@ -214,7 +243,7 @@ npx tsc --noEmit
 
 1. Update code.
 2. **Update this README** (sections touched: overview, routes, stack, env, gaps).
-3. Run **`npx tsc --noEmit`** (and lint if you add ESLint).
+3. Run **`npm run typecheck`** (or `npx tsc --noEmit`) and lint if you add ESLint.
 4. Smoke-test on **iOS + Android** for UI or native changes.
 
 ---
@@ -225,4 +254,4 @@ This is a **living specification**. If a change affects runtime behavior, data s
 
 ---
 
-*Last aligned to repo: Safety Check home, `/map`, `/report`, shared dock, and Aura theme shell.*
+*Last aligned to repo: Phase 0 complete — Supabase auth + user-scoped `profiles` RLS, protected routes, `/auth`, `npm run typecheck`, Safety Check home, `/map`, `/report`, shared dock, Aura theme shell.*

@@ -1,6 +1,6 @@
 import {
+  BookUser,
   MapPinned,
-  MessageCircle,
   Shield,
   UsersRound,
 } from 'lucide-react-native';
@@ -17,18 +17,18 @@ import {
 } from '../theme';
 import { radii } from '../theme/radii';
 
-export type DockTabId = 'protect' | 'map' | 'circles' | 'chat';
+export type DockTabId = 'protect' | 'roster' | 'map' | 'circles';
 
 const TABS: {
   id: DockTabId;
   label: string;
-  href: '/' | '/map' | null;
+  href: '/' | '/roster' | '/map' | null;
   icon: typeof Shield;
 }[] = [
   { id: 'protect', label: 'Protect', href: '/', icon: Shield },
+  { id: 'roster', label: 'Roster', href: '/roster', icon: BookUser },
   { id: 'map', label: 'Map', href: '/map', icon: MapPinned },
   { id: 'circles', label: 'Circles', href: null, icon: UsersRound },
-  { id: 'chat', label: 'Chat', href: null, icon: MessageCircle },
 ];
 
 export function AppDock() {
@@ -36,7 +36,11 @@ export function AppDock() {
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
 
-  const active: DockTabId = pathname.includes('/map') ? 'map' : 'protect';
+  const active: DockTabId = pathname.startsWith('/roster')
+    ? 'roster'
+    : pathname.includes('/map')
+      ? 'map'
+      : 'protect';
   const bottom = Math.max(insets.bottom, 8);
 
   return (

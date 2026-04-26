@@ -7,7 +7,7 @@ let client: SupabaseClient<Database> | null = null;
 /** Call when you need the client; throws if `EXPO_PUBLIC_SUPABASE_*` are unset. */
 export function getSupabase(): SupabaseClient<Database> {
   if (client) return client;
-  const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const url = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim().replace(/\/+$/, '');
   const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anonKey) {
     throw new Error(
@@ -17,8 +17,9 @@ export function getSupabase(): SupabaseClient<Database> {
   client = createClient<Database>(url, anonKey, {
     auth: {
       storage: AsyncStorage,
-      persistSession: true,
-      autoRefreshToken: true,
+      // Keep auth fully explicit in dev to avoid background network-driven crashes.
+      persistSession: false,
+      autoRefreshToken: false,
       detectSessionInUrl: false,
     },
   });

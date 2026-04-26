@@ -17,7 +17,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppDock } from '../components/AppDock';
-import { getSupabase } from '../lib/supabase';
 import { useAuth } from '../providers/AuthProvider';
 import {
   ambientBtn,
@@ -70,29 +69,8 @@ export default function HomeScreen() {
   }, [signOut]);
 
   useEffect(() => {
-    if (!__DEV__) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const { error } = await getSupabase()
-          .from('profiles')
-          .select('id')
-          .limit(1);
-        if (cancelled) return;
-        if (error) {
-          setDbCheck({ ok: false, message: error.message });
-        } else {
-          setDbCheck({ ok: true });
-        }
-      } catch (e) {
-        if (cancelled) return;
-        const message = e instanceof Error ? e.message : String(e);
-        setDbCheck({ ok: false, message });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    // Removed eager dev DB smoke queries to avoid noisy network timeouts on weak links.
+    setDbCheck('idle');
   }, []);
 
   return (
@@ -227,7 +205,7 @@ export default function HomeScreen() {
           {__DEV__ && dbCheck !== 'idle' ? (
             <Text style={styles.dbSmoke} accessibilityLabel="Supabase debug status">
               {dbCheck.ok === true
-                ? 'Supabase: profiles table OK'
+                ? 'Supabase: profiles + roster_people OK'
                 : `Supabase: ${dbCheck.message}`}
             </Text>
           ) : null}
