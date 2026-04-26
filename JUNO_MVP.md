@@ -532,6 +532,8 @@ Tea / Inbox
 ### Phase 3 — Reverse Image Search
 **Goal:** Add image-based public lookup.
 
+**Status: deferred.** No integration has met the bar for **reliable, legal** “photo → real social profiles” at a quality safe for this product; generic reverse-image / people-search APIs are noisy, gated, or ToS‑limited. Revisit only when a provider or approach can support cautious “possible public matches” UX without pretending to be identity verification.
+
 - Add image picker
 - Upload image to Supabase Storage
 - Create `reverse-image-search` Edge Function
@@ -613,7 +615,7 @@ Tea / Inbox
 | 1 | Auth |
 | 2 | Roster |
 | 3 | Registry lookup |
-| 4 | Reverse image search |
+| 4 | Reverse image search — **deferred** (see Phase 3 status) |
 | 5 | Chat screenshot summary |
 | 6 | Tea package sharing |
 | 7 | Friend circles |
@@ -657,7 +659,7 @@ The MVP is complete when a user can:
 - [ ] Create an account
 - [ ] Add friends
 - [ ] Look up a potential date by registry search
-- [ ] Look up a potential date by image search
+- [ ] ~~Look up a potential date by image search~~ — *Phase 3 deferred: no reliable provider for photo → socials today.*
 - [ ] Save that person to roster
 - [ ] Upload a chat screenshot and get an AI summary
 - [ ] Share a tea package with a friend

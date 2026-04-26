@@ -13,12 +13,12 @@ This document is the **source of truth for technical implementation** of the cur
 **What exists in this repository today:**
 
 - **Expo SDK 54** app with **Expo Router** (`expo-router/entry`).
-- **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 + Phase 2 + Phase 4** are implemented in this repo (Phase 4 was built before Phase 2; order in `JUNO_MVP.md` may differ).
+- **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 + Phase 2 + Phase 4 + Phase 6 + Phase 7** are implemented in this repo (Phase 4 was built before Phase 2; order in `JUNO_MVP.md` may differ).
 - **Home route (`/`)** — “**Safety Check**” (requires sign-in): **Juno** wordmark, dashed **upload screenshot** card (optional; still stubbed — `console.log` only), a single form card with **first name**, **last name**, **city** (optional), collapsible **more** (state, ZIP, DOB), **Run safety check** gradient CTA — calls Supabase Edge Function **`lookup-registry`** (Offenders.io on the server), then opens **`/registry/result`** with the saved `registry_checks` id. **Sign out** and disclaimer copy. No “signed in as” line on this screen.
-- **Map route (`/map`)** — **`react-native-maps`** roadmap centered on Seattle, **Google-style light map JSON** on Android (`PROVIDER_GOOGLE`); iOS uses Apple Maps. **No top header** (full-bleed map under status bar); **glass search bar** (placeholder: “Find family, friends, or places…”) + mic stub; **custom markers** (initials on discs + status pill + tail); **people bottom sheet** (rows sorted with **date status first**; initials + corner status icon). Pins / search / mic / rows log to `console.log` for now.
+- **Map route (`/map`)** — **Phase 7 live circle map + date mode:** **`expo-location`** (foreground, while Map is focused) → **`update_my_live_location`** RPC; **Supabase Realtime** + slow poll on `live_locations`; **`list_friends_map_snapshots`** for accepted **Circles** friends (pins when lat/lng exist). **`react-native-maps`**: Android uses **`PROVIDER_GOOGLE`** + light JSON style; **iOS uses Apple MapKit** (no Google Maps key). Glass **search** filters circle sheet by name/username; **Date mode** sheet: pick roster person, optional timer, **Start date** / **End date** (`start_date_session` / `end_date_session` RPCs); friend/self **modals** (started time, timer line, optional **roster AI snapshot** from `date_sessions.companion_ai_summary`). Tables: **`live_locations`**, **`date_sessions`** (+ RLS, migrations `phase7_*`).
 - **Report route (`/report`)** — **Legacy / demo** “background check” UI (initials avatar, verification copy, share-with-circle sheet). **Not** the primary path from **`/`** today; the live registry flow is **`/` → `/registry/result`**.
 - **Auth route (`/auth`)** — email/password **sign in** and **sign up** (`signInWithPassword` / `signUp`); bouncy `ScrollView` + `KeyboardAvoidingView` so primary actions stay reachable when the keyboard is open.
-- **Shared `AppDock`** — `components/AppDock.tsx`: **Protect · Roster · Map · Circles**; Protect ↔ `/`, Roster ↔ `/roster`, Map ↔ `/map` via `router.replace` (instant transition: root **`Stack`** uses **`animation: 'none'`**); Circles remains a stub.
+- **Shared `AppDock`** — `components/AppDock.tsx`: **Protect · Roster · Map · Circles**; Protect ↔ `/`, Roster ↔ `/roster`, Map ↔ `/map`, Circles ↔ `/circles` via `router.replace` (instant transition: root **`Stack`** uses **`animation: 'none'`**).
 - **Roster routes** (all protected): **`/roster`** list with empty states + archived filter, **`/roster/add`** manual add flow, and **`/roster/[id]`** person profile with notes, edit/delete/archive, **registry check** history + link to **`/registry/lookup`**, and **Phase 4** chat screenshot upload + summaries.
 - **Registry routes** (protected): **`/registry/lookup`** (standalone lookup, optional `rosterPersonId` when opened from a person), **`/registry/result`** — Offenders.io-backed matches (photos sorted first; tap photo for full-screen), **Save to roster** / **merge into existing person**.
 - **Global design tokens** under `/theme` (colors, typography, spacing, radii, layout, shadows, **`mapGoogleStyle.ts`** for map JSON, **`getDockOuterHeight()`** for layout math). **`theme/shadows.ts`** tints use **`colors`** (e.g. primary / primaryContainer) instead of hardcoded purple hex where applicable.
@@ -26,10 +26,9 @@ This document is the **source of truth for technical implementation** of the cur
 
 **Not in this repo yet (typical next steps):**
 
-- Reverse image lookup (Phase 3) and remaining MVP phases.
-- More dock routes (Circles as real screens), push notifications, subscriptions.
+- **Phase 3 (reverse image)** — **Intentionally deferred:** no provider meets a reliable / legal bar for photo → real social profiles for this UX. **Phase 5** (tea), **Phase 8** (pushes), background location beyond Map-tab foreground sharing.
 
-**Current status:** **Phase 0 + Phase 1 + Phase 2 + Phase 4**. Supabase includes **`public.registry_checks`** (RLS select/update by owner), **`public.chat_uploads`**, private **`chat-screenshots`** storage; Edge Functions **`lookup-registry`** (Offenders.io registry search + DB row) and **`summarize-chat-screenshot`** (Anthropic OCR/summary). Home **Run safety check** persists a row and shows real matches on **`/registry/result`**.
+**Current status:** **Phase 0 + Phase 1 + Phase 2 + Phase 4 + Phase 6 + Phase 7**. Supabase includes **`public.registry_checks`**, **`public.chat_uploads`**, **`public.friendships`** (+ RPCs for circle), **`public.live_locations`**, **`public.date_sessions`**, private **`chat-screenshots`** storage; Edge Functions **`lookup-registry`** and **`summarize-chat-screenshot`**. Home **Run safety check** persists a row and shows real matches on **`/registry/result`**.
 
 ### Phase 0 checklist (aligned to `JUNO_MVP.md` §8)
 
@@ -58,6 +57,26 @@ This document is the **source of truth for technical implementation** of the cur
 
 **Edge secrets (Supabase Dashboard → Edge Functions → Secrets, not Expo):** `REGISTRY_LOOKUP_URL` (e.g. `https://api.offenders.io/sexoffender`), `REGISTRY_LOOKUP_API_KEY`. Optional stub behavior on dev if URL/key unset (function falls back to deterministic demo names).
 
+### Phase 6 checklist (Circles — `JUNO_MVP.md` §8, abbreviated)
+
+| Item | Status |
+|------|--------|
+| `friendships` + profile discoverability columns | Done (migrations `phase6_*`) |
+| RPCs: search, request, respond, list relationships, remove | Done; **`/circles`** screen (`app/circles.tsx`) |
+
+### Phase 7 checklist (live map + date mode — `JUNO_MVP.md` §8)
+
+| Item | Status |
+|------|--------|
+| `live_locations` + `date_sessions` + RLS | Done (`20260427120000_phase7_date_mode.sql`) |
+| Foreground location on Map tab | Done (`expo-location`, `lib/dateMode.ts` → `update_my_live_location`) |
+| Friend markers + sheet from circle | Done (`list_friends_map_snapshots`, `app/map.tsx`) |
+| Date mode: roster pick, timer, start/end | Done (`start_date_session` / `end_date_session` RPCs) |
+| Friend / self detail + started time + snapshot text | Done (`companion_ai_summary` migration `20260427183000_phase7_companion_ai_snapshot.sql`) |
+| Realtime on `live_locations` | Done (publication in migration; client subscribes on Map focus) |
+
+**Apply migrations** to your hosted project with **`supabase db push`** (see `supabase/migrations/`). If migration history was created under different version ids elsewhere, use **`supabase migration repair`** / **`db pull`** per Supabase CLI messages — do not re-run destructive SQL blindly.
+
 ---
 
 ## 2) Tech Stack
@@ -71,7 +90,8 @@ This document is the **source of truth for technical implementation** of the cur
 | Styling | **StyleSheet** + shared **`/theme`** tokens (no NativeWind / no Tailwind in RN) |
 | Icons | **lucide-react-native** + **react-native-svg** |
 | Images | **expo-image** + **expo-image-picker** |
-| Maps | **react-native-maps** (roadmap; Android uses **Google** provider + JSON style when configured) |
+| Maps | **react-native-maps** (Android: **Google** provider + JSON style; iOS: **MapKit**) |
+| Location | **expo-location** (when-in-use; Map tab foreground updates) |
 | Gradients | **expo-linear-gradient** |
 | Blur | **expo-blur** (map search/sheet chrome; report **Share** modal scrim) |
 | Fonts | **expo-font** + **@expo-google-fonts/plus-jakarta-sans** (primary UI). **Fraunces** / **Inter** packages are present in `package.json` but are **not** loaded in root `_layout` today. |
@@ -88,7 +108,8 @@ juno/
 │   ├── _layout.tsx      # Root layout: fonts, splash, SafeAreaProvider, AuthProvider, route guard
 │   ├── auth.tsx         # Route `/auth` — email/password auth (sign in + sign up)
 │   ├── index.tsx        # Route `/` — Safety Check: form + Run safety check → registry
-│   ├── map.tsx          # Route `/map` — family map UI (map + sheet + search)
+│   ├── map.tsx          # Route `/map` — live circle map + date mode (Phase 7)
+│   ├── circles.tsx      # Route `/circles` — friends, requests, privacy (Phase 6)
 │   ├── report.tsx       # Route `/report` — demo background-check UI (not wired from `/`)
 │   ├── registry/
 │   │   ├── _layout.tsx  # Registry stack
@@ -104,9 +125,11 @@ juno/
 │   ├── AppErrorState.tsx # App-wide error UI
 │   └── AppLoading.tsx   # App-wide loading UI
 ├── lib/
-│   ├── database.types.ts # Generated Supabase DB types
+│   ├── database.types.ts # Supabase DB types (tables + RPCs; keep in sync with migrations)
 │   ├── supabase.ts      # Typed `getSupabase()` + profile upsert helper
 │   ├── roster.ts        # Roster CRUD helpers
+│   ├── dateMode.ts      # Phase 7: map RPCs + live location / date session helpers
+│   ├── circles.ts       # Phase 6: circle RPCs + privacy helpers
 │   ├── api/
 │   │   └── registry.ts  # `lookupRegistry()` → `lookup-registry` Edge Function
 │   ├── registryChecks.ts # Registry check fetch + link to roster person
@@ -114,7 +137,7 @@ juno/
 ├── providers/
 │   └── AuthProvider.tsx # Session handling + auth state listener
 ├── supabase/
-│   ├── migrations/      # Profiles, roster_people, registry_checks, chat_uploads (+ storage/RLS)
+│   ├── migrations/      # Through Phase 7: profiles, roster, registry, chat, friendships, live_locations, date_sessions
 │   └── functions/
 │       ├── lookup-registry/
 │       │   └── index.ts # Edge Function: Offenders.io search + insert `registry_checks`
@@ -129,7 +152,8 @@ juno/
 │   ├── radii.ts         # Corner radii (including sheet / dock lip)
 │   ├── mapGoogleStyle.ts # Google Maps `customMapStyle` JSON (Android)
 │   └── shadows.ts       # ambient card / CTA / dock / pin glow (imports `colors`)
-├── app.json             # Expo config (scheme `juno`, plugins: expo-font, expo-router)
+├── app.json             # Expo config (scheme `juno`, plugins: expo-font, expo-router, expo-location)
+├── app.config.ts        # Merges `app.json` + optional `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY` for Android tiles
 ├── babel.config.js      # babel-preset-expo + expo-router/babel
 ├── package.json         # main: expo-router/entry
 └── tsconfig.json
@@ -153,7 +177,7 @@ juno/
 - **Auth** — `useAuth()` for `user` and `signOut`.
 - **Run safety check** — `lookupRegistry({ name, city?, state?, zip?, dob? })` then `router.push({ pathname: '/registry/result', params: { id: registryCheckId } })`.
 - **Supabase:** auth sessions persist in RN storage; auth state is watched with `onAuthStateChange`; signed-in users are upserted into `profiles` by `id`.
-- **Upload card** — still stubbed (`console.log`); non-routing dock tabs log to the console for now.
+- **Upload card** — still stubbed (`console.log` on **`/`**).
 
 ### 4.3 Auth screen (`/auth`)
 
@@ -161,11 +185,14 @@ juno/
 - If the project has **email confirmation** enabled, sign-up may require confirming email before a session exists (UI shows a message).
 - **Keyboard:** `KeyboardAvoidingView` + bouncy `ScrollView` so CTAs are not covered by the software keyboard.
 
-### 4.4 Map screen
+### 4.4 Map screen (Phase 7)
 
-- **Static region** and **hard-coded marker coordinates** (demo positions near Seattle).
-- **No profile photos** — markers and sheet rows use **initials** on `primaryFixed` discs.
-- **Android:** set `android.config.googleMaps.apiKey` in **app.json** (or `app.config.js`) for Google tiles; without a key, tiles may fail on device builds.
+- **Data:** `listFriendsMapSnapshots` + optional **Realtime** subscription on `public.live_locations` (fallback poll ~60s).
+- **Self:** `getCurrentPositionAsync` + `watchPositionAsync` while **`/map` is focused**; throttled **`update_my_live_location`** RPC (~10s min interval) writes `live_locations` (RLS: own row).
+- **Date mode:** **`start_date_session`** (atomic: end stale session, insert `date_sessions` with `companion_display_name` + optional `companion_ai_summary` from roster, upsert `live_locations` `on_date`); **`end_date_session`** clears active session + normal status; trigger clears live row when session ends.
+- **UI:** filter circle list; pins for self + friends with coordinates; modals for detail; **Date mode** FAB for roster/timer/start/end.
+- **Android map tiles:** optional **`EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY`** in `.env` → merged in **`app.config.ts`**.
+- **iOS:** MapKit + Core Location permission string from **`expo-location`** plugin in **`app.json`**.
 
 ### 4.5 Report screen (`/report`)
 
@@ -203,7 +230,8 @@ juno/
 | `/roster` | `app/roster/index.tsx` | Roster list + empty states + archived toggle (protected) |
 | `/roster/add` | `app/roster/add.tsx` | Manual Add Person flow (protected) |
 | `/roster/[id]` | `app/roster/[id].tsx` | Person profile + registry checks + chat uploads + archive/delete (protected) |
-| `/map` | `app/map.tsx` | Circle / family map (protected) |
+| `/map` | `app/map.tsx` | Live circle map + date mode (protected) |
+| `/circles` | `app/circles.tsx` | Friends, requests, privacy settings (protected) |
 | `/registry/lookup` | `app/registry/lookup.tsx` | Standalone registry form (e.g. from roster deep link) (protected) |
 | `/registry/result` | `app/registry/result.tsx` | Registry matches + save/merge to roster (protected) |
 | `/report` | `app/report.tsx` | Demo background-check UI + share sheet (protected; not used from `/`) |
@@ -239,6 +267,7 @@ Then press `i` / `a` / scan QR for device. Use **`npx expo start -c`** if Metro 
 
 - Copy **`.env.example`** → **`.env`** in the repo root (`.env` is gitignored). **Expo does not load `.env.example`** — without a real **`.env`**, `getSupabase()` will throw at runtime.
 - **Expo** loads **`EXPO_PUBLIC_*`** into the JS bundle — use these for the Supabase browser/RN client.
+- **Optional (Android Map tiles):** `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY` — see **`.env.example`**. Loaded via **`app.config.ts`** (not `app.json` alone).
 - **Where to get values:** Supabase Dashboard → **Project Settings** → **API**: **Project URL** → `EXPO_PUBLIC_SUPABASE_URL`; **anon public** (legacy JWT) or **publishable** key → `EXPO_PUBLIC_SUPABASE_ANON_KEY` (both work with `createClient` today).
 - **Do not place provider secrets in Expo env:** keep them in **Supabase Edge Function secrets** only:
   - **`summarize-chat-screenshot`:** `ANTHROPIC_API_KEY`, optional `ANTHROPIC_VISION_MODEL`, `ANTHROPIC_TEXT_MODEL`.
@@ -264,7 +293,8 @@ Use **`npm run typecheck`** (or `npx tsc --noEmit`) before merging changes that 
 
 ## 8) Native / Expo Config Notes
 
-- **`app.json`**: `scheme: "juno"` for deep linking; `plugins` include **`expo-font`** and **`expo-router`**.
+- **`app.json`**: `scheme: "juno"` for deep linking; `plugins` include **`expo-font`**, **`expo-router`**, and **`expo-location`** (when-in-use permission copy for Map).
+- **`app.config.ts`**: spreads **`app.json`** and injects **`android.config.googleMaps.apiKey`** when `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY` is set.
 - **`newArchEnabled`**: `true` in `app.json` — align with Expo docs if you hit native module issues.
 - **Babel:** `babel-preset-expo` and `@babel/core` are **dependencies** so Metro’s transform worker can always resolve the preset (avoids “Cannot find module 'babel-preset-expo'” when `devDependencies` are omitted).
 
@@ -272,13 +302,12 @@ Use **`npm run typecheck`** (or `npx tsc --noEmit`) before merging changes that 
 
 ## 9) Known Gaps and Planned Work
 
-1. **Phase 3 (`JUNO_MVP.md`)** — Reverse image search + storage + Edge Function + roster save.
-2. **Safety Check upload** — Wire dashed upload card to a real pipeline (OCR / chat flow or separate product path); still stubbed on **`/`**.
-3. **Navigation** — Implement dock routes (Circles, Chat) as real screens or stacks; replace `console.log` stubs.
-4. **Product flows** — Date mode, live circle map data, notifications, vault/history — stubs only today.
-5. **Unused font packages** — Remove `@expo-google-fonts/fraunces` / `inter` or load them in `_layout` if design requires.
-6. **Tests** — No unit/e2e suite yet; add Detox / Maestro / Jest as the app grows.
-7. **CI** — No pipeline documented; add when publishing builds (EAS).
+1. **Phase 3 (`JUNO_MVP.md`)** — Reverse image search **deferred** (documented in `JUNO_MVP.md` §8 Phase 3): no suitable provider for dependable social graph from a single photo.
+2. **Safety Check upload** — Wire dashed upload card on **`/`** to a real pipeline (still stubbed).
+3. **Phase 8+** — Push when date starts / timer ends; optional background location beyond Map-tab foreground sharing; tea inbox / packages per MVP.
+4. **Unused font packages** — Remove `@expo-google-fonts/fraunces` / `inter` or load them in `_layout` if design requires.
+5. **Tests** — No unit/e2e suite yet; add Detox / Maestro / Jest as the app grows.
+6. **CI** — No pipeline documented; add when publishing builds (EAS).
 
 ---
 
@@ -304,4 +333,4 @@ This is a **living specification**. If a change affects runtime behavior, data s
 
 ---
 
-*Last aligned to repo: Phase 0 + Phase 1 + Phase 2 (registry: `registry_checks`, `lookup-registry`, `/registry/*`, `lib/api/registry.ts`) + Phase 4 (chat uploads + `summarize-chat-screenshot`), Safety Check home wired to real registry results, typed Supabase helpers.*
+*Last aligned to repo: Phase 0–2 + Phase 4 (chat uploads + `summarize-chat-screenshot`) + Phase 6 (`/circles`, `friendships`) + Phase 7 (`/map` live locations + `date_sessions`, `lib/dateMode.ts`, migrations `phase7_*`, `expo-location`, optional Android Maps via `app.config.ts`).*
