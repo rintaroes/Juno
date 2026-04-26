@@ -5,7 +5,7 @@ export type RosterPerson = Tables<'roster_people'>;
 
 type RosterCreateInput = Pick<
   TablesInsert<'roster_people'>,
-  'display_name' | 'estimated_age' | 'dob' | 'state' | 'zip' | 'notes'
+  'display_name' | 'estimated_age' | 'dob' | 'state' | 'zip' | 'notes' | 'source'
 > & {
   owner_id: string;
 };
@@ -51,7 +51,7 @@ export async function createRosterPerson(input: RosterCreateInput) {
     state: input.state?.trim() || null,
     zip: input.zip?.trim() || null,
     notes: input.notes?.trim() || null,
-    source: 'manual',
+    source: input.source ?? 'manual',
   };
 
   const { data, error } = await getSupabase()
