@@ -301,6 +301,7 @@ export type Database = {
           first_name: string;
           friendship_id: string;
           profile_id: string;
+          search_email: string;
           status: string;
           username: string;
         }[];
@@ -324,6 +325,9 @@ export type Database = {
           first_name: string;
           matched_on: string;
           profile_id: string;
+          relationship_direction: string;
+          relationship_status: string;
+          search_email: string;
           username: string;
         }[];
       };
