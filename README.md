@@ -13,7 +13,7 @@ This document is the **source of truth for technical implementation** of the cur
 **What exists in this repository today:**
 
 - **Expo SDK 54** app with **Expo Router** (`expo-router/entry`).
-- **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 are complete** in code and Supabase; next milestones are lookup features.
+- **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 are complete**, and **Phase 4 (chat screenshot OCR + AI summary)** is now implemented out of order ahead of Phases 2/3.
 - **Home route (`/`)** — “**Safety Check**” screen (requires sign-in): centered **Juno** wordmark, **signed in as** email line, **Sign out**, Material-inspired UI (Plus Jakarta Sans, purple / M3-style tokens), dashed **upload screenshot** card (tap → `console.log` only), **first name** + **city** text fields, **Verify Profile** gradient CTA — navigates to **`/report`** with `firstName` / `city` query params (defaults applied when empty). In **`__DEV__`**, a one-line **Supabase** smoke line under the disclaimer tests `profiles` `select` (RLS must allow the signed-in user). Disclaimer copy.
 - **Map route (`/map`)** — **`react-native-maps`** roadmap centered on Seattle, **Google-style light map JSON** on Android (`PROVIDER_GOOGLE`); iOS uses Apple Maps. **No top header** (full-bleed map under status bar); **glass search bar** (placeholder: “Find family, friends, or places…”) + mic stub; **custom markers** (initials on discs + status pill + tail); **people bottom sheet** (rows sorted with **date status first**; initials + corner status icon). Pins / search / mic / rows log to `console.log` for now.
 - **Report route (`/report`)** — **Background check** result UI after verify: centered Juno, back to Protect, summary card with **initials avatar** (no photos), verification rows (identity, **sex offender registry** copy, collapsible **social links** stub), disclaimer, large **Share report with Circle** CTA. **Share** opens a **bottom sheet** with dark **blur + dim scrim**, **“Share with Circle”** header, **N Selected** pill, horizontal **circle member** strip (initials-only avatars, gradient ring when selected, **Add** stub), **Cancel** / **Share** (native share sheet with chosen names — stub).
@@ -25,11 +25,10 @@ This document is the **source of truth for technical implementation** of the cur
 
 **Not in this repo yet (typical next steps):**
 
-- Server-side APIs (Edge Functions, webhooks, etc.).
-- Real image upload / reverse image search / background check integrations.
-- More dock routes (Circles, Chat as real screens), push notifications, subscriptions.
+- Registry lookup and reverse image lookup flows (Phases 2/3).
+- More dock routes (Circles as real screens), push notifications, subscriptions.
 
-**Current status:** **Phase 0 + Phase 1 complete** — the app has real auth/session guards plus the first private data model. Supabase includes **`public.profiles`** and **`public.roster_people`** (owner-scoped RLS), and the app ships a typed roster data helper (`lib/roster.ts`) with list/create/read/update/archive/delete operations backing `/roster`, `/roster/add`, and `/roster/[id]`.
+**Current status:** **Phase 0 + Phase 1 complete**, plus **Phase 4 chat screenshot flow**. Supabase now includes **`public.chat_uploads`** and a private **`chat-screenshots`** storage bucket with owner-scoped policies; deployed edge function **`summarize-chat-screenshot`** performs OCR/summary via Anthropic using `ANTHROPIC_API_KEY`. The roster person profile now supports screenshot upload and displays summary/opening-line/red-flag/green-flag results.
 
 ### Phase 0 checklist (aligned to `JUNO_MVP.md` §8)
 
@@ -58,7 +57,7 @@ This document is the **source of truth for technical implementation** of the cur
 | UI | **React Native** 0.81, **React** 19 |
 | Styling | **StyleSheet** + shared **`/theme`** tokens (no NativeWind / no Tailwind in RN) |
 | Icons | **lucide-react-native** + **react-native-svg** |
-| Images | **expo-image** (available; circle/report UIs use initials where noted) |
+| Images | **expo-image** + **expo-image-picker** |
 | Maps | **react-native-maps** (roadmap; Android uses **Google** provider + JSON style when configured) |
 | Gradients | **expo-linear-gradient** |
 | Blur | **expo-blur** (map search/sheet chrome; report **Share** modal scrim) |
@@ -77,18 +76,28 @@ juno/
 │   ├── auth.tsx         # Route `/auth` — email/password auth (sign in + sign up)
 │   ├── index.tsx        # Route `/` — Safety Check home UI (protected)
 │   ├── map.tsx          # Route `/map` — family map UI (map + sheet + search)
-│   └── report.tsx       # Route `/report` — background check result + share sheet
+│   ├── report.tsx       # Route `/report` — background check result + share sheet
+│   └── roster/
+│       ├── _layout.tsx  # Roster stack layout
+│       ├── index.tsx    # Route `/roster` list + empty states + archived toggle
+│       ├── add.tsx      # Route `/roster/add` manual add flow
+│       └── [id].tsx     # Route `/roster/[id]` profile edit + archive/delete + chat uploads
 ├── components/
 │   ├── AppDock.tsx      # Shared bottom navigation (Protect / Map / …)
 │   ├── AppErrorState.tsx # App-wide error UI
 │   └── AppLoading.tsx   # App-wide loading UI
 ├── lib/
 │   ├── database.types.ts # Generated Supabase DB types
-│   └── supabase.ts      # Typed `getSupabase()` + profile upsert helper
+│   ├── supabase.ts      # Typed `getSupabase()` + profile upsert helper
+│   ├── roster.ts        # Roster CRUD helpers
+│   └── chatUploads.ts   # Chat upload list helper
 ├── providers/
 │   └── AuthProvider.tsx # Session handling + auth state listener
 ├── supabase/
-│   └── migrations/      # Mirrored from hosted Supabase: `create_profiles`, `phase0_auth_foundation`
+│   ├── migrations/      # Profiles, roster_people, chat_uploads (+ storage/RLS policies)
+│   └── functions/
+│       └── summarize-chat-screenshot/
+│           └── index.ts # Edge Function: OCR + AI summary via Anthropic
 ├── theme/
 │   ├── index.ts         # Re-exports all tokens
 │   ├── colors.ts        # M3-style / Aura mock palette (primary, surfaces, etc.)
@@ -114,7 +123,7 @@ juno/
 
 1. **`package.json`** `"main": "expo-router/entry"` boots the router.
 2. **`app/_layout.tsx`** loads fonts, keeps native splash until fonts resolve (or error), then wraps the app in **`SafeAreaProvider`** + **`AuthProvider`**. A root route guard redirects signed-out users to `/auth`, redirects signed-in users away from `/auth`, and renders app-level loading/error states.
-3. **`app/index.tsx`** is the **default route** `/` (home); **`app/map.tsx`** is **`/map`**; **`app/report.tsx`** is **`/report`**. All of these (and other non-`/auth` stack routes) are **reachable only with a valid session** unless the route guard is extended later.
+3. **`app/index.tsx`** is the **default route** `/` (home); **`app/roster/index.tsx`** is **`/roster`**; **`app/map.tsx`** is **`/map`**; **`app/report.tsx`** is **`/report`**. All of these (and other non-`/auth` stack routes) are **reachable only with a valid session** unless the route guard is extended later.
 
 ### 4.2 State on the home screen
 
@@ -145,6 +154,14 @@ juno/
 
 - Visuals follow the **Aura / Material-style** token set in `theme/colors.ts` (e.g. `primary`, `surfaceBright`, `secondaryContainer`, dock indigo accents).
 - **Shadows** are defined in `theme/shadows.ts` with iOS `shadow*` and Android `elevation` where applicable, referencing **`colors`** for tint.
+
+### 4.7 Chat screenshot AI flow (Phase 4)
+
+- User opens **`/roster/[id]`** and taps **Add Chat Screenshot**.
+- App picks an image via `expo-image-picker`, uploads bytes to private bucket **`chat-screenshots`** at `{userId}/{rosterPersonId}/{timestamp}.{ext}`.
+- App invokes edge function **`summarize-chat-screenshot`** with `{ rosterPersonId, screenshotPath }`.
+- Function validates JWT and ownership, downloads screenshot, runs Anthropic vision OCR + cautious text summary, stores output in **`public.chat_uploads`**, then returns parsed fields to client.
+- UI reloads and renders timestamp, summary, opening line, red flags, and green flags cards.
 
 ---
 
@@ -192,6 +209,7 @@ Then press `i` / `a` / scan QR for device. Use **`npx expo start -c`** if Metro 
 - Copy **`.env.example`** → **`.env`** in the repo root (`.env` is gitignored).
 - **Expo** loads **`EXPO_PUBLIC_*`** into the JS bundle — use these for the Supabase browser/RN client.
 - **Where to get values:** Supabase Dashboard → **Project Settings** → **API**: **Project URL** → `EXPO_PUBLIC_SUPABASE_URL`; **anon public** (legacy JWT) or **publishable** key → `EXPO_PUBLIC_SUPABASE_ANON_KEY` (both work with `createClient` today).
+- **Do not place provider secrets in Expo env**: keep Anthropic/API secrets server-side in Supabase Edge Function secrets (`ANTHROPIC_API_KEY`, optional `ANTHROPIC_VISION_MODEL`, `ANTHROPIC_TEXT_MODEL`).
 - **Postgres connection string** (`postgresql://…`, used by **Prisma**, scripts, or `psql`): Dashboard → **Project Settings** → **Database** → **Connection string** (URI). Prefer the **pooler** URI for serverless/tooling if you hit connection limits. **Do not** put `DATABASE_URL` in the mobile app — only in local tooling or a private server.
 - **Prisma vs Supabase-only:** For this Expo app, the “backend” is normally **Supabase Postgres + RLS + PostgREST**, accessed only via **`@supabase/supabase-js`** from the client. Add **Prisma** only if you want a **separate Node** service or migration CLI talking to Postgres over `DATABASE_URL`; it is not installed in this repo by default (avoids duplicating schema between Prisma and Supabase migrations).
 
@@ -222,8 +240,8 @@ Use **`npm run typecheck`** (or `npx tsc --noEmit`) before merging changes that 
 ## 9) Known Gaps and Planned Work
 
 1. **Phase 2 (next, `JUNO_MVP.md`)** — Registry lookup form + Edge Function + result persistence (`registry_checks`) + save/merge into roster.
-2. **Backend APIs** — Edge Functions, webhooks, and server-side integrations.
-3. **Safety Check** — Wire upload to **expo-image-picker** (or document picker), then API; real verify → report pipeline.
+2. **Backend APIs** — Additional Edge Functions and integrations for Phase 2/3/5+.
+3. **Safety Check** — Wire upload to real verification pipeline; home upload card is still stubbed.
 4. **Navigation** — Implement dock routes (Circles, Chat) as real screens or stacks; replace `console.log` stubs.
 5. **Product flows** — Date mode, live circle map data, notifications, vault/history — stubs only today.
 6. **Unused font packages** — Remove `@expo-google-fonts/fraunces` / `inter` or load them in `_layout` if design requires.
@@ -254,4 +272,4 @@ This is a **living specification**. If a change affects runtime behavior, data s
 
 ---
 
-*Last aligned to repo: Phase 0 complete — Supabase auth + user-scoped `profiles` RLS, protected routes, `/auth`, `npm run typecheck`, Safety Check home, `/map`, `/report`, shared dock, Aura theme shell.*
+*Last aligned to repo: Phase 0 + Phase 1 complete, plus Phase 4 chat screenshot OCR/summary (`chat_uploads`, `chat-screenshots`, `summarize-chat-screenshot`), protected routes, roster stack, and typed Supabase helpers.*

@@ -36,6 +36,60 @@ export type Database = {
         };
         Relationships: [];
       };
+      chat_uploads: {
+        Row: {
+          ai_summary: string | null;
+          created_at: string;
+          green_flags: string[];
+          id: string;
+          ocr_text: string | null;
+          opening_line: string | null;
+          owner_id: string;
+          red_flags: string[];
+          roster_person_id: string;
+          screenshot_url: string;
+        };
+        Insert: {
+          ai_summary?: string | null;
+          created_at?: string;
+          green_flags?: string[];
+          id?: string;
+          ocr_text?: string | null;
+          opening_line?: string | null;
+          owner_id: string;
+          red_flags?: string[];
+          roster_person_id: string;
+          screenshot_url: string;
+        };
+        Update: {
+          ai_summary?: string | null;
+          created_at?: string;
+          green_flags?: string[];
+          id?: string;
+          ocr_text?: string | null;
+          opening_line?: string | null;
+          owner_id?: string;
+          red_flags?: string[];
+          roster_person_id?: string;
+          screenshot_url?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'chat_uploads_owner_id_fkey';
+            columns: ['owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'chat_uploads_roster_person_id_fkey';
+            columns: ['roster_person_id'];
+            isOneToOne: false;
+            referencedRelation: 'roster_people';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       roster_people: {
         Row: {
           ai_summary: string | null;

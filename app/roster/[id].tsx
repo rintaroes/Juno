@@ -1,8 +1,11 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Archive, ChevronLeft, Trash2 } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { Buffer } from 'buffer';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,6 +16,8 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { listChatUploads, type ChatUpload } from '../../lib/chatUploads';
+import { getSupabase } from '../../lib/supabase';
 import {
   deleteRosterPerson,
   getRosterPerson,
@@ -49,8 +54,10 @@ export default function RosterPersonScreen() {
   const insets = useSafeAreaInsets();
 
   const [person, setPerson] = useState<RosterPerson | null>(null);
+  const [chatUploads, setChatUploads] = useState<ChatUpload[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingChat, setUploadingChat] = useState(false);
   const [form, setForm] = useState({
     displayName: '',
     estimatedAge: '',
@@ -62,6 +69,11 @@ export default function RosterPersonScreen() {
 
   const isArchived = person?.archived_at != null;
   const canSave = useMemo(() => form.displayName.trim().length > 1, [form.displayName]);
+
+  const loadChatUploads = async (ownerId: string, rosterPersonId: string) => {
+    const data = await listChatUploads(ownerId, rosterPersonId);
+    setChatUploads(data);
+  };
 
   useEffect(() => {
     const run = async () => {
@@ -76,6 +88,7 @@ export default function RosterPersonScreen() {
         }
         setPerson(data);
         setForm(toForm(data));
+        await loadChatUploads(user.id, data.id);
       } catch (e) {
         Alert.alert('Could not load person', e instanceof Error ? e.message : 'Try again.');
         router.replace('/roster');
@@ -106,6 +119,91 @@ export default function RosterPersonScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const onUploadChatScreenshot = async () => {
+    if (!user?.id || !id || !person || uploadingChat) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert(
+        'Permission required',
+        'Allow photo library access to upload chat screenshots.',
+      );
+      return;
+    }
+
+    const pickResult = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 0.85,
+      base64: true,
+    });
+
+    if (pickResult.canceled || pickResult.assets.length === 0) {
+      return;
+    }
+
+    const asset = pickResult.assets[0];
+    setUploadingChat(true);
+    try {
+      const uri = asset.uri;
+      const ext =
+        (asset.fileName?.split('.').pop() || uri.split('.').pop() || 'jpg').toLowerCase();
+      const path = `${user.id}/${person.id}/${Date.now()}.${ext}`;
+        const base64 = asset.base64?.trim();
+        if (!base64) {
+          throw new Error(
+            'Selected image did not include base64 data. Please try another screenshot.',
+          );
+        }
+        const fileBytes = Buffer.from(base64, 'base64');
+        if (!fileBytes.byteLength) {
+          throw new Error(
+            'Selected image resolved to 0 bytes. Please re-screenshot and try again.',
+          );
+        }
+
+        const { error: uploadError } = await getSupabase()
+          .storage
+          .from('chat-screenshots')
+          .upload(path, fileBytes, {
+            upsert: false,
+            contentType: asset.mimeType ?? 'image/jpeg',
+          });
+        if (uploadError) throw uploadError;
+
+        const { error: functionError } = await getSupabase().functions.invoke(
+          'summarize-chat-screenshot',
+          {
+            body: { rosterPersonId: person.id, screenshotPath: path },
+          },
+        );
+        if (functionError) {
+          let detail = functionError.message;
+          const maybeContext = (
+            functionError as { context?: { json?: () => Promise<unknown> } }
+          ).context;
+          if (maybeContext?.json) {
+            try {
+              const payload = (await maybeContext.json()) as { error?: string };
+              if (payload?.error) detail = payload.error;
+            } catch {
+              // Ignore context parse failures and fall back to default message.
+            }
+          }
+          throw new Error(detail);
+        }
+
+        await loadChatUploads(user.id, person.id);
+        Alert.alert('Summary ready', 'Chat screenshot analyzed and saved.');
+      } catch (e) {
+        Alert.alert(
+          'Upload failed',
+          e instanceof Error ? e.message : 'Unable to process screenshot.',
+        );
+      } finally {
+        setUploadingChat(false);
+      }
   };
 
   const onToggleArchive = () => {
@@ -317,6 +415,57 @@ export default function RosterPersonScreen() {
                 <Text style={styles.saveLabel}>{saving ? 'Saving...' : 'Save changes'}</Text>
               </Pressable>
 
+              <View style={styles.chatSection}>
+                <Text style={styles.chatSectionTitle}>Chat Screenshot Summaries</Text>
+                <Text style={styles.chatSectionHint}>
+                  Upload a dating app or iMessage screenshot to extract OCR and AI context.
+                </Text>
+                <Pressable
+                  disabled={uploadingChat}
+                  onPress={() => {
+                    void onUploadChatScreenshot();
+                  }}
+                  style={({ pressed }) => [
+                    styles.chatUploadBtn,
+                    uploadingChat && styles.saveBtnDisabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  {uploadingChat ? (
+                    <>
+                      <ActivityIndicator color={colors.onPrimary} />
+                      <Text style={styles.chatUploadLabel}>Analyzing screenshot...</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.chatUploadLabel}>Add Chat Screenshot</Text>
+                  )}
+                </Pressable>
+
+                {chatUploads.length === 0 ? (
+                  <Text style={styles.chatEmptyText}>No chat screenshots yet.</Text>
+                ) : (
+                  <View style={styles.chatList}>
+                    {chatUploads.map((entry) => (
+                      <View key={entry.id} style={styles.chatCard}>
+                        <Text style={styles.chatCardMeta}>
+                          {new Date(entry.created_at).toLocaleString()}
+                        </Text>
+                        {entry.opening_line ? (
+                          <Text style={styles.chatOpeningLine}>
+                            Opening line: {entry.opening_line}
+                          </Text>
+                        ) : null}
+                        <Text style={styles.chatSummaryText}>
+                          {entry.ai_summary ?? 'No summary generated.'}
+                        </Text>
+                        <FlagList title="Red flags" items={entry.red_flags} />
+                        <FlagList title="Green flags" items={entry.green_flags} />
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+
               <View style={styles.secondaryActions}>
                 <Pressable
                   onPress={onToggleArchive}
@@ -344,6 +493,23 @@ export default function RosterPersonScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+function FlagList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <View style={styles.flagBlock}>
+      <Text style={styles.flagTitle}>{title}</Text>
+      {items.length === 0 ? (
+        <Text style={styles.flagEmpty}>None detected.</Text>
+      ) : (
+        items.map((item, index) => (
+          <Text key={`${title}-${index}`} style={styles.flagRow}>
+            - {item}
+          </Text>
+        ))
+      )}
     </View>
   );
 }
@@ -450,6 +616,88 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.bodyLg,
     color: colors.onPrimary,
+  },
+  chatSection: {
+    marginTop: spacing.md,
+    gap: spacing.xs,
+  },
+  chatSectionTitle: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyLg,
+    color: colors.onSurface,
+  },
+  chatSectionHint: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelMd,
+    lineHeight: lineHeight(typeScale.labelMd, 1.45),
+    color: colors.onSurfaceVariant,
+  },
+  chatUploadBtn: {
+    marginTop: spacing.xs,
+    borderRadius: radii.full,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    flexDirection: 'row',
+    paddingVertical: 12,
+  },
+  chatUploadLabel: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelMd,
+    color: colors.onPrimary,
+  },
+  chatEmptyText: {
+    marginTop: spacing.xs,
+    fontFamily: fontFamily.regular,
+    color: colors.onSurfaceVariant,
+  },
+  chatList: {
+    marginTop: spacing.xs,
+    gap: spacing.sm,
+  },
+  chatCard: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surfaceContainerLowest,
+    padding: spacing.sm,
+    gap: 4,
+  },
+  chatCardMeta: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelSm,
+    color: colors.tertiary,
+  },
+  chatOpeningLine: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelMd,
+    color: colors.onSurface,
+  },
+  chatSummaryText: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelMd,
+    lineHeight: lineHeight(typeScale.labelMd, 1.45),
+    color: colors.onSurfaceVariant,
+  },
+  flagBlock: {
+    marginTop: 4,
+    gap: 2,
+  },
+  flagTitle: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelSm,
+    color: colors.onSurface,
+  },
+  flagEmpty: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelSm,
+    color: colors.onSurfaceVariant,
+  },
+  flagRow: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelSm,
+    color: colors.onSurfaceVariant,
   },
   secondaryActions: {
     gap: spacing.xs,
