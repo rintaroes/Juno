@@ -109,6 +109,55 @@ export type Database = {
           },
         ];
       };
+      circle_messages: {
+        Row: {
+          body: string | null;
+          created_at: string;
+          id: string;
+          recipient_id: string;
+          sender_id: string;
+          tea_package_id: string | null;
+        };
+        Insert: {
+          body?: string | null;
+          created_at?: string;
+          id?: string;
+          recipient_id: string;
+          sender_id: string;
+          tea_package_id?: string | null;
+        };
+        Update: {
+          body?: string | null;
+          created_at?: string;
+          id?: string;
+          recipient_id?: string;
+          sender_id?: string;
+          tea_package_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'circle_messages_recipient_id_fkey';
+            columns: ['recipient_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'circle_messages_sender_id_fkey';
+            columns: ['sender_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'circle_messages_tea_package_id_fkey';
+            columns: ['tea_package_id'];
+            isOneToOne: false;
+            referencedRelation: 'tea_packages';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       chat_uploads: {
         Row: {
           ai_summary: string | null;
@@ -228,6 +277,93 @@ export type Database = {
             columns: ['roster_person_id'];
             isOneToOne: false;
             referencedRelation: 'roster_people';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      tea_package_recipients: {
+        Row: {
+          created_at: string;
+          id: string;
+          recipient_id: string;
+          tea_package_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          recipient_id: string;
+          tea_package_id: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          recipient_id?: string;
+          tea_package_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'tea_package_recipients_recipient_id_fkey';
+            columns: ['recipient_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'tea_package_recipients_tea_package_id_fkey';
+            columns: ['tea_package_id'];
+            isOneToOne: false;
+            referencedRelation: 'tea_packages';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      tea_packages: {
+        Row: {
+          ai_digest: string | null;
+          created_at: string;
+          id: string;
+          include_chat_summary: boolean;
+          include_profile_summary: boolean;
+          include_registry: boolean;
+          note: string | null;
+          roster_person_id: string;
+          sender_id: string;
+        };
+        Insert: {
+          ai_digest?: string | null;
+          created_at?: string;
+          id?: string;
+          include_chat_summary?: boolean;
+          include_profile_summary?: boolean;
+          include_registry?: boolean;
+          note?: string | null;
+          roster_person_id: string;
+          sender_id: string;
+        };
+        Update: {
+          ai_digest?: string | null;
+          created_at?: string;
+          id?: string;
+          include_chat_summary?: boolean;
+          include_profile_summary?: boolean;
+          include_registry?: boolean;
+          note?: string | null;
+          roster_person_id?: string;
+          sender_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'tea_packages_roster_person_id_fkey';
+            columns: ['roster_person_id'];
+            isOneToOne: false;
+            referencedRelation: 'roster_people';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'tea_packages_sender_id_fkey';
+            columns: ['sender_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
             referencedColumns: ['id'];
           },
         ];
@@ -456,6 +592,31 @@ export type Database = {
           username: string;
         }[];
       };
+      list_circle_messages: {
+        Args: { p_friend_id: string };
+        Returns: {
+          body: string | null;
+          created_at: string;
+          message_id: string;
+          recipient_id: string;
+          sender_id: string;
+          tea_package_id: string | null;
+        }[];
+      };
+      list_circle_threads: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          friend_city: string | null;
+          friend_email: string | null;
+          friend_id: string;
+          friend_name: string;
+          friend_username: string | null;
+          last_message_at: string | null;
+          last_message_id: string | null;
+          last_message_preview: string | null;
+          last_message_type: string;
+        }[];
+      };
       list_friends_map_snapshots: {
         Args: Record<PropertyKey, never>;
         Returns: {
@@ -498,6 +659,21 @@ export type Database = {
           search_email: string;
           username: string;
         }[];
+      };
+      send_circle_text_message: {
+        Args: { p_body: string; p_friend_id: string };
+        Returns: string;
+      };
+      send_tea_package_message: {
+        Args: {
+          p_include_chat_summary?: boolean;
+          p_include_profile_summary?: boolean;
+          p_include_registry?: boolean;
+          p_note?: string | null;
+          p_recipient_id: string;
+          p_roster_person_id: string;
+        };
+        Returns: string;
       };
       start_date_session: {
         Args: {
