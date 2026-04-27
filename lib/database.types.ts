@@ -24,6 +24,7 @@ export type Database = {
           id: string;
           phone_e164: string | null;
           search_email: string | null;
+          share_location_always: boolean;
           updated_at: string;
           username: string | null;
         };
@@ -38,6 +39,7 @@ export type Database = {
           id: string;
           phone_e164?: string | null;
           search_email?: string | null;
+          share_location_always?: boolean;
           updated_at?: string;
           username?: string | null;
         };
@@ -52,6 +54,7 @@ export type Database = {
           id?: string;
           phone_e164?: string | null;
           search_email?: string | null;
+          share_location_always?: boolean;
           updated_at?: string;
           username?: string | null;
         };

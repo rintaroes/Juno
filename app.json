@@ -34,7 +34,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Juno uses your location on the Map tab so friends in your circle can see you while the app is open."
+          "locationWhenInUsePermission": "Juno uses your location to show you on the map and share with your circle.",
+          "locationAlwaysAndWhenInUsePermission": "Turn on Always so Juno can update your circle when the app is in the background — similar to Life360.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ]
     ]

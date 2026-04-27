@@ -1,3 +1,5 @@
+import '../lib/backgroundLocationTask';
+
 import {
   PlusJakartaSans_400Regular,
   PlusJakartaSans_500Medium,

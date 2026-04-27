@@ -21,9 +21,9 @@ export function getSupabase(): SupabaseClient<Database> {
   client = createClient<Database>(url, anonKey, {
     auth: {
       storage: AsyncStorage,
-      // Keep auth fully explicit in dev to avoid background network-driven crashes.
-      persistSession: false,
-      autoRefreshToken: false,
+      // Persisted session required so background location task can call `update_my_live_location`.
+      persistSession: true,
+      autoRefreshToken: true,
       detectSessionInUrl: false,
     },
   });

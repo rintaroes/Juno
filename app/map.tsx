@@ -22,6 +22,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -45,6 +46,10 @@ import {
   type FriendMapSnapshot,
   type LiveLocationRow,
 } from '../lib/dateMode';
+import {
+  startLiveLocationBackgroundTask,
+  stopLiveLocationBackgroundTask,
+} from '../lib/liveLocationBackground';
 import { listRosterPeople, type RosterPerson } from '../lib/roster';
 import { getSupabase } from '../lib/supabase';
 import { useAuth } from '../providers/AuthProvider';
@@ -83,7 +88,9 @@ const FRIEND_PIN_FOCUS_MS = 720;
 /** Self pin / map tap / tab focus: snap to you (near-instant) */
 const SELF_PIN_FOCUS_MS = 1;
 /** Must match `styles.sheet.maxHeight` — used to offset camera so “You” sits in visible map above sheet + dock */
-const CIRCLE_SHEET_MAX_HEIGHT = 300;
+const CIRCLE_SHEET_MAX_HEIGHT = 360;
+/** On-map initials disc — same diameter for you and every friend */
+const MAP_PIN_MARKER_SIZE = 56;
 
 function regionForFriendFocus(latitude: number, longitude: number): Region {
   return {
@@ -253,6 +260,8 @@ export default function MapScreen() {
   const [mySession, setMySession] = useState<DateSessionRow | null>(null);
   const [dateActionLoading, setDateActionLoading] = useState(false);
   const [safetySignalLoading, setSafetySignalLoading] = useState(false);
+  const [shareLocationAlways, setShareLocationAlways] = useState(false);
+  const [shareLocationToggling, setShareLocationToggling] = useState(false);
   const [tick, setTick] = useState(0);
 
   const dockH = useMemo(() => getDockOuterHeight(insets.bottom), [insets.bottom]);
@@ -283,6 +292,21 @@ export default function MapScreen() {
     const id = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
   }, []);
+
+  /** Start/stop OS background updates when preference + permissions allow (e.g. after app restart). */
+  useEffect(() => {
+    if (!user?.id || Platform.OS === 'web') return;
+    if (!shareLocationAlways) {
+      void stopLiveLocationBackgroundTask();
+      return;
+    }
+    void (async () => {
+      const fg = await Location.getForegroundPermissionsAsync();
+      const bg = await Location.getBackgroundPermissionsAsync();
+      if (!fg.granted || !bg.granted) return;
+      await startLiveLocationBackgroundTask().catch(() => {});
+    })();
+  }, [user?.id, shareLocationAlways]);
 
   const refreshFriends = useCallback(async () => {
     if (!user?.id) return;
@@ -329,10 +353,81 @@ export default function MapScreen() {
     [computeSelfSnapRegion],
   );
 
+  const onToggleShareLocationAlways = useCallback(
+    async (enabled: boolean) => {
+      if (!user?.id || Platform.OS === 'web') return;
+      setShareLocationToggling(true);
+      try {
+        if (!enabled) {
+          await stopLiveLocationBackgroundTask();
+          const { error } = await getSupabase()
+            .from('profiles')
+            .update({ share_location_always: false })
+            .eq('id', user.id);
+          if (error) throw error;
+          setShareLocationAlways(false);
+          return;
+        }
+
+        let fg = await Location.getForegroundPermissionsAsync();
+        if (!fg.granted) {
+          fg = await Location.requestForegroundPermissionsAsync();
+        }
+        if (!fg.granted) {
+          Alert.alert('Location needed', 'Allow location access first so your circle can see you.');
+          return;
+        }
+
+        if (Platform.OS === 'android') {
+          const proceed = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              'Background location',
+              'Next, Android may ask you to allow location all the time so Juno can update your circle when the app is closed.',
+              [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Continue', onPress: () => resolve(true) },
+              ],
+            );
+          });
+          if (!proceed) return;
+        }
+
+        let bg = await Location.getBackgroundPermissionsAsync();
+        if (!bg.granted) {
+          bg = await Location.requestBackgroundPermissionsAsync();
+        }
+        if (!bg.granted) {
+          Alert.alert(
+            'Always location',
+            'Allow “Always” / “Allow all the time” for Juno in system settings so background sharing works.',
+          );
+          return;
+        }
+
+        const { error } = await getSupabase()
+          .from('profiles')
+          .update({ share_location_always: true })
+          .eq('id', user.id);
+        if (error) throw error;
+        setShareLocationAlways(true);
+        await startLiveLocationBackgroundTask();
+      } catch (e) {
+        Alert.alert(
+          'Could not update',
+          e instanceof Error ? e.message : 'Something went wrong.',
+        );
+      } finally {
+        setShareLocationToggling(false);
+      }
+    },
+    [user?.id],
+  );
+
   useFocusEffect(
     useCallback(() => {
       if (!user?.id) {
         setLocPerm('unknown');
+        setShareLocationAlways(false);
         return undefined;
       }
 
@@ -362,10 +457,13 @@ export default function MapScreen() {
               try {
                 const { data: prof } = await supabase
                   .from('profiles')
-                  .select('first_name')
+                  .select('first_name, share_location_always')
                   .eq('id', user.id)
                   .maybeSingle();
-                if (alive) setMyFirstName(prof?.first_name ?? null);
+                if (alive) {
+                  setMyFirstName(prof?.first_name ?? null);
+                  setShareLocationAlways(!!prof?.share_location_always);
+                }
               } catch {
                 /* ignore */
               }
@@ -494,7 +592,7 @@ export default function MapScreen() {
         badge: onDate ? 'On a Date' : 'You',
         badgeVariant: onDate ? 'date' : 'primary',
         initial: initialLetter(myFirstName || user.email?.split('@')[0] || 'Y'),
-        markerSize: 64,
+        markerSize: MAP_PIN_MARKER_SIZE,
       });
     }
     for (const f of friends) {
@@ -507,7 +605,7 @@ export default function MapScreen() {
         badge: onDate ? 'On a Date' : 'Circle',
         badgeVariant: onDate ? 'date' : 'glass',
         initial: initialLetter(displayName(f)),
-        markerSize: 56,
+        markerSize: MAP_PIN_MARKER_SIZE,
       });
     }
     return out;
@@ -763,6 +861,27 @@ export default function MapScreen() {
             contentContainerStyle={styles.sheetScrollInner}
             showsVerticalScrollIndicator={false}
           >
+            {user?.id && Platform.OS !== 'web' ? (
+              <View style={styles.shareAlwaysRow}>
+                <View style={styles.shareAlwaysTextCol}>
+                  <Text style={styles.shareAlwaysTitle}>Always share location</Text>
+                  <Text style={styles.shareAlwaysHint}>
+                    Updates your circle when Juno is in the background — like Life360. Uses more
+                    battery; Android shows a status notification while active.
+                  </Text>
+                </View>
+                <Switch
+                  accessibilityLabel="Always share location with your circle"
+                  value={shareLocationAlways}
+                  disabled={shareLocationToggling || locPerm === 'denied'}
+                  onValueChange={(v) => {
+                    void onToggleShareLocationAlways(v);
+                  }}
+                  trackColor={{ false: colors.outlineVariant, true: colors.primaryContainer }}
+                  thumbColor={Platform.OS === 'android' ? colors.surfaceContainerLowest : undefined}
+                />
+              </View>
+            ) : null}
             {!user?.id ? (
               <Text style={styles.emptyText}>Sign in to see your circle on the map.</Text>
             ) : sortedSheet.length === 0 ? (
@@ -1187,12 +1306,39 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
   },
   sheetScroll: {
-    maxHeight: 220,
+    maxHeight: 268,
   },
   sheetScrollInner: {
     paddingHorizontal: 12,
     paddingBottom: 12,
     gap: 8,
+  },
+  shareAlwaysRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: 4,
+    marginBottom: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.outlineVariant,
+  },
+  shareAlwaysTextCol: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 4,
+  },
+  shareAlwaysTitle: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelMd,
+    color: colors.onSurface,
+    marginBottom: 4,
+  },
+  shareAlwaysHint: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelSm,
+    lineHeight: lineHeight(typeScale.labelSm, 1.38),
+    color: colors.onSurfaceVariant,
   },
   emptyText: {
     fontFamily: fontFamily.regular,
@@ -1221,9 +1367,9 @@ const styles = StyleSheet.create({
     }),
   },
   personAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: MAP_PIN_MARKER_SIZE,
+    height: MAP_PIN_MARKER_SIZE,
+    borderRadius: MAP_PIN_MARKER_SIZE / 2,
     backgroundColor: colors.primaryFixed,
     borderWidth: 1,
     borderColor: 'rgba(201, 196, 213, 0.35)',
@@ -1232,7 +1378,7 @@ const styles = StyleSheet.create({
   },
   personInitial: {
     fontFamily: fontFamily.bold,
-    fontSize: 18,
+    fontSize: 20,
     color: colors.primary,
   },
   personBadge: {
