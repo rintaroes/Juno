@@ -3,7 +3,9 @@ import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTeaPackageDetail, listCircleMessages, listRosterForTea, sendCircleTextMessage, sendTeaPackageMessage, type CircleMessage } from '../../../lib/circleChat';
+import { getSupabase } from '../../../lib/supabase';
 import { useAuth } from '../../../providers/AuthProvider';
 import { colors, containerMargin, fontFamily, lineHeight, radii, spacing, typeScale } from '../../../theme';
 
@@ -63,6 +66,39 @@ export default function CircleChatScreen() {
   useEffect(() => {
     void loadMessages();
   }, [loadMessages]);
+
+  useEffect(() => {
+    if (!friendId || !user?.id) return;
+    const supabase = getSupabase();
+    const channel = supabase
+      .channel(`circle-messages-${user.id}-${friendId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'circle_messages',
+        },
+        (payload) => {
+          const row = payload.new as {
+            sender_id?: string;
+            recipient_id?: string;
+          };
+          const a = row.sender_id;
+          const b = row.recipient_id;
+          const involvesCurrentThread =
+            (a === user.id && b === friendId) || (a === friendId && b === user.id);
+          if (involvesCurrentThread) {
+            void loadMessages();
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [friendId, loadMessages, user?.id]);
 
   const onSendText = useCallback(async () => {
     if (!friendId) return;
@@ -186,29 +222,42 @@ export default function CircleChatScreen() {
         })}
       </ScrollView>
 
-      <View style={[styles.composeBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-        <TextInput
-          value={messageInput}
-          onChangeText={setMessageInput}
-          placeholder="Message..."
-          placeholderTextColor={colors.outline}
-          style={styles.input}
-          multiline
-        />
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => {
-            void onSendText();
-          }}
-          disabled={sending || messageInput.trim().length === 0}
-          style={({ pressed }) => [styles.sendBtn, (sending || messageInput.trim().length === 0) && styles.disabled, pressed && styles.pressed]}
-        >
-          <Send color={colors.onPrimary} size={18} strokeWidth={2} />
-        </Pressable>
-      </View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 8}
+      >
+        <View style={[styles.composeBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <TextInput
+            value={messageInput}
+            onChangeText={setMessageInput}
+            placeholder="Message..."
+            placeholderTextColor={colors.outline}
+            style={styles.input}
+            multiline
+          />
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              void onSendText();
+            }}
+            disabled={sending || messageInput.trim().length === 0}
+            style={({ pressed }) => [
+              styles.sendBtn,
+              (sending || messageInput.trim().length === 0) && styles.disabled,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Send color={colors.onPrimary} size={18} strokeWidth={2} />
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
 
       <Modal visible={teaModalOpen} transparent animationType="slide" onRequestClose={() => setTeaModalOpen(false)}>
-        <View style={styles.modalRoot}>
+        <KeyboardAvoidingView
+          style={styles.modalRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
+        >
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Send Tea Package</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rosterStrip}>
@@ -253,13 +302,17 @@ export default function CircleChatScreen() {
                   void onSendTea();
                 }}
                 disabled={!selectedRosterId || sendingTea}
-                style={({ pressed }) => [styles.sendTeaBtn, (!selectedRosterId || sendingTea) && styles.disabled, pressed && styles.pressed]}
+                style={({ pressed }) => [
+                  styles.sendTeaBtn,
+                  (!selectedRosterId || sendingTea) && styles.disabled,
+                  pressed && styles.pressed,
+                ]}
               >
                 <Text style={styles.sendTeaBtnLabel}>{sendingTea ? 'Sending...' : 'Send Tea'}</Text>
               </Pressable>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -352,11 +405,12 @@ const styles = StyleSheet.create({
   modalRoot: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     padding: containerMargin,
   },
   modalCard: {
     borderRadius: radii.lg,
+    maxHeight: '70%',
     backgroundColor: colors.surfaceContainerLowest,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
