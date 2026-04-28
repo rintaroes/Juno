@@ -3,6 +3,9 @@
  * Load via `useFonts` in `app/_layout.tsx`.
  */
 export const fontFamily = {
+  fraunces: 'Fraunces_400Regular',
+  inter: 'Inter_400Regular',
+  interMedium: 'Inter_500Medium',
   regular: 'PlusJakartaSans_400Regular',
   medium: 'PlusJakartaSans_500Medium',
   semiBold: 'PlusJakartaSans_600SemiBold',

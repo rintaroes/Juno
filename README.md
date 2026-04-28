@@ -14,10 +14,11 @@ This document is the **source of truth for technical implementation** of the cur
 
 - **Expo SDK 54** app with **Expo Router** (`expo-router/entry`).
 - **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 + Phase 2 + Phase 4 + Phase 6 + Phase 7 + Phase 8** are implemented in this repo (Phase 4 was built before Phase 2; order in `JUNO_MVP.md` may differ).
+- **Onboarding route group (`/(onboarding)`)** — new **16-screen** first-launch flow (Hook → Problem → Personalized Solution → Immersion → Paywall), progress dots, character art, permissions, invite step, demo first check, and subscription paywall entry.
 - **Home route (`/`)** — “**Safety Check**” (requires sign-in): **Juno** wordmark, dashed **upload screenshot** card (optional; still stubbed — `console.log` only), a single form card with **first name**, **last name**, **city** (optional), collapsible **more** (state, ZIP, DOB), **Run safety check** gradient CTA — calls Supabase Edge Function **`lookup-registry`** (Offenders.io on the server), then opens **`/registry/result`** with the saved `registry_checks` id. **Sign out** and disclaimer copy. No “signed in as” line on this screen.
 - **Map route (`/map`)** — **Phase 7 + 8 live circle map + date mode + safety signals + optional always-on location:** Foreground **`expo-location`** watch while **`/map` is focused** → **`update_my_live_location`**; optional **“Always share location”** (saved on **`profiles.share_location_always`**) enables **`expo-task-manager`** background updates + OS permissions (Life360-style; rebuild required). **Supabase Realtime** + poll on **`live_locations`**; **`list_friends_map_snapshots`** for pins. **`react-native-maps`**, camera tuned for dock + Circle sheet. Glass **search**; **Date mode** + **I'm safe** / **Alert circle** pushes; **`notify-date-mode-started`** on session start. Tables / migrations: **`live_locations`**, **`date_sessions`**, **`push_devices`**, **`profiles.share_location_always`** (`phase7_*`, `phase8_*`, **`20260429120000_profiles_share_location_always.sql`**).
 - **Report route (`/report`)** — **Legacy / demo** “background check” UI (initials avatar, verification copy, share-with-circle sheet). **Not** the primary path from **`/`** today; the live registry flow is **`/` → `/registry/result`**.
-- **Auth route (`/auth`)** — email/password **sign in** and **sign up** (`signInWithPassword` / `signUp`); bouncy `ScrollView` + `KeyboardAvoidingView` so primary actions stay reachable when the keyboard is open.
+- **Auth route (`/auth`)** — email/password **sign in** and **sign up** (`signInWithPassword` / `signUp`); bouncy `ScrollView` + `KeyboardAvoidingView` so primary actions stay reachable when the keyboard is open. Onboarding auth step currently routes to this existing phone/email path (Apple/Google onboarding buttons removed for now).
 - **Shared `AppDock`** — `components/AppDock.tsx`: **Protect · Roster · Map · Circles**; Protect ↔ `/`, Roster ↔ `/roster`, Map ↔ `/map`, Circles ↔ `/circles` via `router.replace` (instant transition: root **`Stack`** uses **`animation: 'none'`**).
 - **Roster routes** (all protected): **`/roster`** list with empty states + archived filter, **`/roster/add`** manual add flow, and **`/roster/[id]`** person profile with notes, edit/delete/archive, **registry check** history + link to **`/registry/lookup`**, and **Phase 4** chat screenshot upload + summaries.
 - **Registry routes** (protected): **`/registry/lookup`** (standalone lookup, optional `rosterPersonId` when opened from a person), **`/registry/result`** — Offenders.io-backed matches (photos sorted first; tap photo for full-screen), **Save to roster** / **merge into existing person**.
@@ -101,6 +102,7 @@ This document is the **source of truth for technical implementation** of the cur
 | Language | **TypeScript** ~5.9 |
 | UI | **React Native** 0.81, **React** 19 |
 | Styling | **StyleSheet** + shared **`/theme`** tokens (no NativeWind / no Tailwind in RN) |
+| State | **Zustand** + AsyncStorage persist middleware (onboarding state) |
 | Icons | **lucide-react-native** + **react-native-svg** |
 | Images | **expo-image** + **expo-image-picker** |
 | Maps | **react-native-maps** (Android: **Google** provider + JSON style; iOS: **MapKit**) |
@@ -109,9 +111,11 @@ This document is the **source of truth for technical implementation** of the cur
 | Push notifications | **expo-notifications** (permission + Expo token registration; **`EXPO_PUBLIC_EAS_PROJECT_ID`** in `.env` merged via **`app.config.ts`**) |
 | Gradients | **expo-linear-gradient** |
 | Blur | **expo-blur** (map search/sheet chrome; report **Share** modal scrim) |
-| Fonts | **expo-font** + **@expo-google-fonts/plus-jakarta-sans** (primary UI). **Fraunces** / **Inter** packages are present in `package.json` but are **not** loaded in root `_layout` today. |
+| Fonts | **expo-font** + **@expo-google-fonts/plus-jakarta-sans** + **Fraunces** + **Inter** (loaded in `app/_layout.tsx`) |
 | Babel | **babel-preset-expo** + **expo-router/babel** (both declared so Metro workers resolve them) |
 | Backend (client) | **`@supabase/supabase-js`** + **`@react-native-async-storage/async-storage`** — typed `lib/supabase.ts` with **`persistSession: true`** / **`autoRefreshToken: true`** (needed for background location RPCs). |
+| Contacts | **expo-contacts** (onboarding circle invite picker) |
+| Subscriptions | **react-native-purchases** dependency installed; runtime wiring exists in onboarding paywall helper (native setup still required before production billing) |
 
 ---
 
@@ -123,6 +127,10 @@ juno/
 │   ├── _layout.tsx      # Root layout: fonts, splash, SafeAreaProvider, AuthProvider, route guard
 │   ├── auth.tsx         # Route `/auth` — email/password auth (sign in + sign up)
 │   ├── index.tsx        # Route `/` — Safety Check: form + Run safety check → registry
+│   ├── (onboarding)/    # 16-screen onboarding stack (first-launch gated)
+│   │   ├── _layout.tsx  # Onboarding stack: no headers
+│   │   ├── welcome.tsx ... paywall.tsx # Hook → Paywall flow screens
+│   │   └── characters/  # Character-heavy screens (welcome/problem/first-check)
 │   ├── map.tsx          # Route `/map` — circle map, date mode, push/safety, optional always-on location
 │   ├── circles.tsx      # Route `/circles` — friends, requests, privacy (Phase 6)
 │   ├── report.tsx       # Route `/report` — demo background-check UI (not wired from `/`)
@@ -137,8 +145,12 @@ juno/
 │       └── [id].tsx     # Route `/roster/[id]` profile edit + archive/delete + chat uploads
 ├── components/
 │   ├── AppDock.tsx      # Shared bottom navigation (Protect / Map / …)
+│   ├── AnimatedCharacter.tsx # SVG character renderer (static; no animation)
+│   ├── onboarding/      # Shared onboarding primitives (screen/header/body/button/dots/character)
 │   ├── AppErrorState.tsx # App-wide error UI
 │   └── AppLoading.tsx   # App-wide loading UI
+├── assets/
+│   └── character/       # Onboarding SVG variants (default/wave/heart/two/peeking/concerned/trio/settled)
 ├── lib/
 │   ├── database.types.ts # Supabase DB types (tables + RPCs; keep in sync with migrations)
 │   ├── supabase.ts      # Typed `getSupabase()` + profile upsert helper
@@ -147,6 +159,9 @@ juno/
 │   ├── backgroundLocationTask.ts # TaskManager task → `update_my_live_location` (imported from `app/_layout.tsx`)
 │   ├── liveLocationBackground.ts # start/stop `Location.startLocationUpdatesAsync`
 │   ├── pushNotifications.ts # Expo permission + token + register-push-token invoke
+│   ├── onboardingAnalytics.ts # Event tracker helper (fallback insert/log strategy)
+│   ├── onboardingInvites.ts # Invitation insert + Edge Function invoke helper
+│   ├── subscriptions.ts # RevenueCat configure + purchase helper
 │   ├── circles.ts       # Phase 6: circle RPCs + privacy helpers
 │   ├── api/
 │   │   └── registry.ts  # `lookupRegistry()` → `lookup-registry` Edge Function
@@ -154,6 +169,8 @@ juno/
 │   └── chatUploads.ts   # Chat upload list helper
 ├── providers/
 │   └── AuthProvider.tsx # Session handling + auth state listener
+├── stores/
+│   └── onboardingStore.ts # Persisted onboarding state (`juno_onboarding_completed` + flow data)
 ├── supabase/
 │   ├── migrations/      # Through Phase 8 + `share_location_always` on profiles
 │   └── functions/
@@ -195,7 +212,9 @@ juno/
 ### 4.1 Entry & navigation
 
 1. **`package.json`** `"main": "expo-router/entry"` boots the router.
-2. **`app/_layout.tsx`** imports **`lib/backgroundLocationTask`** once (registers the background location task), loads fonts, keeps native splash until fonts resolve (or error), then wraps the app in **`SafeAreaProvider`** + **`AuthProvider`**. A root route guard redirects signed-out users to `/auth`, redirects signed-in users away from `/auth`, and renders app-level loading/error states.
+2. **`app/_layout.tsx`** imports **`lib/backgroundLocationTask`** once (registers the background location task), loads fonts, keeps native splash until fonts resolve (or error), then wraps the app in **`SafeAreaProvider`** + **`AuthProvider`**.
+3. Root guard now checks AsyncStorage key **`juno_onboarding_completed`**. If missing, user is routed into **`/(onboarding)/welcome`** first.
+4. After onboarding is completed, guard behavior applies: signed-out users redirect to `/auth`, signed-in users redirect away from `/auth`, with app-level loading/error states.
 3. **`app/index.tsx`** is the **default route** `/` (home); **`app/roster/index.tsx`** is **`/roster`**; **`app/map.tsx`** is **`/map`**; **`app/report.tsx`** is **`/report`**; **`app/registry/*`** are **`/registry/...`**. All of these (and other non-`/auth` stack routes) are **reachable only with a valid session** unless the route guard is extended later.
 
 ### 4.2 State on the home screen
@@ -247,6 +266,18 @@ juno/
 - Function validates JWT and ownership, downloads screenshot, runs Anthropic vision OCR + cautious text summary, stores output in **`public.chat_uploads`**, then returns parsed fields to client.
 - UI reloads and renders timestamp, summary, opening line, red flags, and green flags cards.
 
+### 4.9 Onboarding flow architecture (new)
+
+- **Entry condition:** first launch (or reset) when **`juno_onboarding_completed`** is absent/false.
+- **State:** `stores/onboardingStore.ts` persisted with Zustand + AsyncStorage:
+  - `currentStep`, `selectedReasons`, `invitedFriends`, `permissions`, `selectedTier`, `completed`.
+- **Screens:** 16-step sequence from `/(onboarding)/welcome` to `/(onboarding)/paywall`.
+- **UI primitives:** `components/onboarding/*` enforce consistent spacing, CTA treatment, progress dots, and character usage.
+- **Characters:** onboarding uses local SVG assets in `assets/character`.
+- **Current auth behavior inside onboarding:** phone/email path only (routes to existing `/auth`); OAuth onboarding buttons removed.
+- **Paywall:** UI and purchase wiring exist (`lib/subscriptions.ts`) and can mark profile subscription status after successful purchase call.
+- **Invites:** onboarding circle step can prepare invites and call the invite helper (`lib/onboardingInvites.ts`); depends on backend contracts (`invitations` table + invite Edge Function).
+
 ---
 
 ## 5) Routes
@@ -263,6 +294,7 @@ juno/
 | `/registry/lookup` | `app/registry/lookup.tsx` | Standalone registry form (e.g. from roster deep link) (protected) |
 | `/registry/result` | `app/registry/result.tsx` | Registry matches + save/merge to roster (protected) |
 | `/report` | `app/report.tsx` | Demo background-check UI + share sheet (protected; not used from `/`) |
+| `/(onboarding)/welcome` ... `/(onboarding)/paywall` | `app/(onboarding)/*.tsx` | First-launch onboarding + paywall sequence |
 
 Add new routes as `app/<segment>.tsx` or `app/<folder>/index.tsx` per [Expo Router conventions](https://docs.expo.dev/router/introduction/).
 
@@ -297,6 +329,9 @@ Then press `i` / `a` / scan QR for device. Use **`npx expo start -c`** if Metro 
 - **Expo** loads **`EXPO_PUBLIC_*`** into the JS bundle — use these for the Supabase browser/RN client.
 - **Optional (Android Map tiles):** `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY` — see **`.env.example`**. Loaded via **`app.config.ts`** (not `app.json` alone).
 - **Expo push project id:** `EXPO_PUBLIC_EAS_PROJECT_ID` — merged into **`extra.eas.projectId`** for **`expo-notifications`** (see **`.env.example`**).
+- **RevenueCat keys (optional, onboarding paywall):**
+  - `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY`
+  - `EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY`
 - **Where to get values:** Supabase Dashboard → **Project Settings** → **API**: **Project URL** → `EXPO_PUBLIC_SUPABASE_URL`; **anon public** (legacy JWT) or **publishable** key → `EXPO_PUBLIC_SUPABASE_ANON_KEY` (both work with `createClient` today).
 - **Do not place provider secrets in Expo env:** keep them in **Supabase Edge Function secrets** only:
   - **`summarize-chat-screenshot`:** `ANTHROPIC_API_KEY`, optional `ANTHROPIC_VISION_MODEL`, `ANTHROPIC_TEXT_MODEL`.
@@ -323,6 +358,7 @@ Use **`npm run typecheck`** (or `npx tsc --noEmit`) before merging changes that 
 ## 8) Native / Expo Config Notes
 
 - **`app.json`**: `scheme: "juno"` for deep linking; `plugins` include **`expo-font`**, **`expo-router`**, **`expo-location`** (when-in-use + **always** permission strings; **iOS background location** + **Android background / foreground service** flags for optional always-on sharing), and **`expo-notifications`**.
+- **RevenueCat plugin note:** do **not** add `react-native-purchases` to Expo plugins in this repo right now; it currently breaks Expo config resolution in local dev. Keep runtime wiring in code until native config path is finalized.
 - **`app.config.ts`**: spreads **`app.json`**, injects **`android.config.googleMaps.apiKey`** when `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY` is set, and **`extra.eas.projectId`** when `EXPO_PUBLIC_EAS_PROJECT_ID` is set.
 - **`newArchEnabled`**: `true` in `app.json` — align with Expo docs if you hit native module issues.
 - **Babel:** `babel-preset-expo` and `@babel/core` are **dependencies** so Metro’s transform worker can always resolve the preset (avoids “Cannot find module 'babel-preset-expo'” when `devDependencies` are omitted).
@@ -333,7 +369,7 @@ Use **`npm run typecheck`** (or `npx tsc --noEmit`) before merging changes that 
 
 1. **Phase 3 (`JUNO_MVP.md`)** — Reverse image search **deferred** (documented in `JUNO_MVP.md` §8 Phase 3): no suitable provider for dependable social graph from a single photo.
 2. **Safety Check upload** — Wire dashed upload card on **`/`** to a real pipeline (still stubbed).
-3. **Unused font packages** — Remove `@expo-google-fonts/fraunces` / `inter` or load them in `_layout` if design requires.
+3. **Onboarding polish** — Ongoing visual/layout tuning for exact final UX (spacing rhythm, card hierarchy, copy alignment) across all 16 screens.
 4. **Tests** — No unit/e2e suite yet; add Detox / Maestro / Jest as the app grows.
 5. **CI** — No pipeline documented; add when publishing builds (EAS).
 
@@ -361,4 +397,4 @@ This is a **living specification**. If a change affects runtime behavior, data s
 
 ---
 
-*Last aligned to repo: Phase 0–2 + Phase 4 + Phase 6 + Phase 7 (`/map`, `date_sessions`, `live_locations`) + Phase 8 (push + safety Edge Functions + `lib/pushNotifications.ts`) + optional **always-on location** (`profiles.share_location_always`, `expo-task-manager`, `lib/backgroundLocationTask.ts`, auth **persistSession**), plus map UX (camera offset, pin sizes, initial zoom).*
+*Last aligned to repo: Phase 0–2 + Phase 4 + Phase 6 + Phase 7 (`/map`, `date_sessions`, `live_locations`) + Phase 8 (push + safety Edge Functions + `lib/pushNotifications.ts`) + optional **always-on location** (`profiles.share_location_always`, `expo-task-manager`, `lib/backgroundLocationTask.ts`, auth **persistSession**) + full **16-screen onboarding** (`/(onboarding)` first-launch guard, Zustand persisted flow state, onboarding components, character SVG assets, invite/paywall helpers) + current onboarding UX iteration changes (larger character art, static characters, bottom-anchored CTAs, updated card/selection styling).*

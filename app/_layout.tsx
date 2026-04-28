@@ -1,5 +1,8 @@
 import '../lib/backgroundLocationTask';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Fraunces_400Regular } from '@expo-google-fonts/fraunces';
+import { Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
 import {
   PlusJakartaSans_400Regular,
   PlusJakartaSans_500Medium,
@@ -10,11 +13,12 @@ import {
 import { useFonts } from 'expo-font';
 import { Redirect, Stack, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppErrorState } from '../components/AppErrorState';
 import { AppLoading } from '../components/AppLoading';
 import { AuthProvider, useAuth } from '../providers/AuthProvider';
+import { ONBOARDING_COMPLETION_KEY } from '../stores/onboardingStore';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -25,6 +29,9 @@ export default function RootLayout() {
     PlusJakartaSans_600SemiBold,
     PlusJakartaSans_700Bold,
     PlusJakartaSans_800ExtraBold,
+    Fraunces_400Regular,
+    Inter_400Regular,
+    Inter_500Medium,
   });
 
   useEffect(() => {
@@ -49,14 +56,44 @@ export default function RootLayout() {
 function RootNavigator() {
   const { session, loading, error, clearError } = useAuth();
   const segments = useSegments();
+  const [onboardingReady, setOnboardingReady] = useState(false);
+  const [onboardingCompleted, setOnboardingCompleted] = useState(false);
   const inAuthGroup = segments[0] === 'auth';
+  const inOnboardingGroup = segments[0] === '(onboarding)';
 
-  if (loading) {
+  useEffect(() => {
+    let active = true;
+    void AsyncStorage.getItem(ONBOARDING_COMPLETION_KEY).then((value) => {
+      if (!active) return;
+      setOnboardingCompleted(value === 'true');
+      setOnboardingReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (loading || !onboardingReady) {
     return <AppLoading />;
   }
 
   if (error) {
     return <AppErrorState message={error} onRetry={clearError} />;
+  }
+
+  if (!onboardingCompleted && !inOnboardingGroup) {
+    return <Redirect href="/(onboarding)/characters/welcome" />;
+  }
+
+  if (!onboardingCompleted && inOnboardingGroup) {
+    return (
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          animation: 'none',
+        }}
+      />
+    );
   }
 
   if (!session && !inAuthGroup) {

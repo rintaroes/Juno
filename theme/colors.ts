@@ -2,6 +2,11 @@
  * Aura Safety / M3 tokens (Tailwind mock).
  */
 export const colors = {
+  cream: '#fbf8ff',
+  stone: '#5d5d68',
+  coral: '#e96f6f',
+  sienna: '#a45f4a',
+  charcoal: '#1b1b20',
   primary: '#5f4bbe',
   tertiary: '#5d5d68',
   tertiaryFixed: '#e3e1ee',
