@@ -17,9 +17,14 @@ export default function TeaPackageDetailScreen() {
 
   useEffect(() => {
     if (!teaPackageId) return;
+    console.log('[tea] opening tea package detail', { teaPackageId });
     void getTeaPackageDetail(teaPackageId)
       .then(setItem)
       .catch((error) => {
+        console.log('[tea] getTeaPackageDetail failed', {
+          teaPackageId,
+          message: error instanceof Error ? error.message : String(error),
+        });
         setErrorMsg(error instanceof Error ? error.message : 'Failed to load tea package.');
       });
   }, [teaPackageId]);
@@ -48,7 +53,7 @@ export default function TeaPackageDetailScreen() {
         {!item ? <Text style={styles.hint}>Loading tea package...</Text> : null}
         {item ? (
           <View style={styles.card}>
-            <Text style={styles.heading}>{item.roster_people?.display_name ?? 'Unknown person'}</Text>
+            <Text style={styles.heading}>{item.roster_display_name ?? 'Unknown person'}</Text>
             <Text style={styles.meta}>
               Sent {new Date(item.created_at).toLocaleString()}
             </Text>

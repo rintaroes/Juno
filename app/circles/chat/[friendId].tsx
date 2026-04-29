@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getTeaPackageDetail, listCircleMessages, listRosterForTea, sendCircleTextMessage, sendTeaPackageMessage, type CircleMessage } from '../../../lib/circleChat';
+import { listCircleMessages, listRosterForTea, sendCircleTextMessage, sendTeaPackageMessage, type CircleMessage } from '../../../lib/circleChat';
 import { getSupabase } from '../../../lib/supabase';
 import { useAuth } from '../../../providers/AuthProvider';
 import { colors, containerMargin, fontFamily, lineHeight, radii, spacing, typeScale } from '../../../theme';
@@ -48,6 +48,7 @@ export default function CircleChatScreen() {
     () => rosterOptions.find((r) => r.id === selectedRosterId) ?? null,
     [rosterOptions, selectedRosterId],
   );
+  const rosterNeedsScroll = rosterOptions.length > 2;
 
   const loadMessages = useCallback(async () => {
     if (!friendId) return;
@@ -259,58 +260,102 @@ export default function CircleChatScreen() {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 24 : 0}
         >
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Send Tea Package</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rosterStrip}>
-              {rosterOptions.map((r) => (
-                <Pressable
-                  key={r.id}
-                  accessibilityRole="button"
-                  onPress={() => setSelectedRosterId(r.id)}
-                  style={({ pressed }) => [
-                    styles.rosterChip,
-                    selectedRosterId === r.id && styles.rosterChipActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={styles.rosterChipLabel}>{r.display_name}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-            <TextInput
-              value={teaNote}
-              onChangeText={setTeaNote}
-              placeholder="Optional note..."
-              placeholderTextColor={colors.outline}
-              style={styles.input}
-            />
-            {selectedRoster ? (
-              <Text style={styles.hint} numberOfLines={2}>
-                Sharing: {selectedRoster.display_name}
-              </Text>
-            ) : null}
-            <View style={styles.modalActions}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setTeaModalOpen(false)}
-                style={({ pressed }) => [styles.outlineBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.outlineBtnLabel}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  void onSendTea();
-                }}
-                disabled={!selectedRosterId || sendingTea}
-                style={({ pressed }) => [
-                  styles.sendTeaBtn,
-                  (!selectedRosterId || sendingTea) && styles.disabled,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={styles.sendTeaBtnLabel}>{sendingTea ? 'Sending...' : 'Send Tea'}</Text>
-              </Pressable>
-            </View>
+            <Text style={styles.modalTitle}>Compile Tea Package</Text>
+            {rosterOptions.length === 0 ? (
+              <>
+                <View style={styles.emptyRosterCard}>
+                  <Text style={styles.emptyRosterTitle}>No roster entries yet</Text>
+                  <Text style={styles.hint}>
+                    Add someone to Roster first, then you can compile and send tea packages.
+                  </Text>
+                </View>
+                <View style={styles.modalActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setTeaModalOpen(false)}
+                    style={({ pressed }) => [styles.outlineBtn, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.outlineBtnLabel}>Close</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setTeaModalOpen(false);
+                      router.push('/roster/add');
+                    }}
+                    style={({ pressed }) => [styles.sendTeaBtn, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.sendTeaBtnLabel}>Go to Roster</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <>
+                <Text style={styles.sectionLabel}>Choose a person</Text>
+                <View style={[styles.rosterListWrap, rosterNeedsScroll && styles.rosterListWrapScroll]}>
+                  <ScrollView
+                    scrollEnabled={rosterNeedsScroll}
+                    showsVerticalScrollIndicator={rosterNeedsScroll}
+                    contentContainerStyle={styles.rosterList}
+                  >
+                    {rosterOptions.map((r) => (
+                      <Pressable
+                        key={r.id}
+                        accessibilityRole="button"
+                        onPress={() => setSelectedRosterId(r.id)}
+                        style={({ pressed }) => [
+                          styles.rosterRow,
+                          selectedRosterId === r.id && styles.rosterRowActive,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text style={styles.rosterRowTitle}>{r.display_name}</Text>
+                        <Text style={styles.rosterRowHint} numberOfLines={1}>
+                          {r.ai_summary ?? r.notes ?? 'No summary yet'}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+                <TextInput
+                  value={teaNote}
+                  onChangeText={setTeaNote}
+                  placeholder="Optional note..."
+                  placeholderTextColor={colors.outline}
+                  style={styles.input}
+                />
+                {selectedRoster ? (
+                  <Text style={styles.hint} numberOfLines={2}>
+                    Ready to send: {selectedRoster.display_name}
+                  </Text>
+                ) : null}
+                <View style={styles.modalActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setTeaModalOpen(false)}
+                    style={({ pressed }) => [styles.outlineBtn, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.outlineBtnLabel}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      void onSendTea();
+                    }}
+                    disabled={!selectedRosterId || sendingTea}
+                    style={({ pressed }) => [
+                      styles.sendTeaBtn,
+                      (!selectedRosterId || sendingTea) && styles.disabled,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.sendTeaBtnLabel}>
+                      {sendingTea ? 'Compiling...' : 'Compile & Send'}
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -418,17 +463,61 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   modalTitle: { fontFamily: fontFamily.semiBold, fontSize: typeScale.titleLg, color: colors.onSurface },
-  rosterStrip: { gap: spacing.xs, paddingVertical: 2 },
-  rosterChip: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 8,
-    borderRadius: radii.full,
+  sectionLabel: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelMd,
+    color: colors.onSurface,
+  },
+  rosterListWrap: {
+    borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
     backgroundColor: colors.surface,
+    overflow: 'hidden',
   },
-  rosterChipActive: { backgroundColor: colors.primaryContainer, borderColor: colors.primary },
-  rosterChipLabel: { fontFamily: fontFamily.medium, fontSize: typeScale.labelSm, color: colors.onSurface },
+  rosterListWrapScroll: {
+    maxHeight: 180,
+  },
+  rosterList: {
+    padding: spacing.xs,
+    gap: spacing.xs,
+  },
+  rosterRow: {
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.surfaceContainerHighest,
+    backgroundColor: colors.surfaceContainerLowest,
+    gap: 2,
+  },
+  rosterRowActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryContainer,
+  },
+  rosterRowTitle: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    color: colors.onSurface,
+  },
+  rosterRowHint: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelSm,
+    color: colors.onSurfaceVariant,
+  },
+  emptyRosterCard: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.surfaceContainerHighest,
+    backgroundColor: colors.surface,
+    padding: spacing.sm,
+    gap: spacing.xs,
+  },
+  emptyRosterTitle: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    color: colors.onSurface,
+  },
   modalActions: { flexDirection: 'row', gap: spacing.sm },
   outlineBtn: {
     flex: 1,

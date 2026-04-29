@@ -23,10 +23,7 @@ export type CircleMessage = {
 };
 
 export type TeaPackageDetail = Tables<'tea_packages'> & {
-  roster_people: Pick<
-    Tables<'roster_people'>,
-    'id' | 'display_name' | 'ai_summary' | 'notes' | 'state' | 'zip'
-  > | null;
+  roster_display_name: string | null;
 };
 
 export async function listCircleThreads() {
@@ -87,10 +84,27 @@ export async function getTeaPackageDetail(teaPackageId: string) {
   const { data, error } = await getSupabase()
     .from('tea_packages')
     .select(
-      'id, sender_id, roster_person_id, note, include_registry, include_profile_summary, include_chat_summary, ai_digest, created_at, roster_people(id, display_name, ai_summary, notes, state, zip)',
+      'id, sender_id, roster_person_id, note, include_registry, include_profile_summary, include_chat_summary, ai_digest, created_at',
     )
     .eq('id', teaPackageId)
     .single();
-  if (error) throw error;
-  return data as TeaPackageDetail;
+  if (error) {
+    console.log('[tea] getTeaPackageDetail tea_packages error', {
+      teaPackageId,
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw error;
+  }
+  const { data: rosterRow } = await getSupabase()
+    .from('roster_people')
+    .select('display_name')
+    .eq('id', data.roster_person_id)
+    .maybeSingle();
+  return {
+    ...(data as Tables<'tea_packages'>),
+    roster_display_name: rosterRow?.display_name ?? null,
+  } as TeaPackageDetail;
 }
