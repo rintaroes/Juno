@@ -1,9 +1,8 @@
-import { ArrowLeft } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AppDock } from '../../components/AppDock';
 import {
   getCirclePrivacySettings,
   listCircleRelationships,
@@ -17,7 +16,7 @@ import {
 } from '../../lib/circles';
 import { ensureProfileForUser } from '../../lib/supabase';
 import { useAuth } from '../../providers/AuthProvider';
-import { ambientCard, colors, containerMargin, fontFamily, lineHeight, radii, spacing, typeScale } from '../../theme';
+import { ambientCard, colors, containerMargin, fontFamily, getDockOuterHeight, lineHeight, radii, spacing, typeScale } from '../../theme';
 
 type PrivacyForm = {
   firstName: string;
@@ -42,9 +41,9 @@ function identityLabel(profile: {
 }
 
 export default function CirclesSettingsScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const dockH = useMemo(() => getDockOuterHeight(insets.bottom), [insets.bottom]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -143,15 +142,15 @@ export default function CirclesSettingsScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.scroll,
-          { paddingTop: insets.top + spacing.sm, paddingHorizontal: containerMargin, paddingBottom: spacing.xl },
+          {
+            paddingTop: insets.top + spacing.sm,
+            paddingHorizontal: containerMargin,
+            paddingBottom: dockH + spacing.lg,
+          },
         ]}
       >
         <View style={styles.topRow}>
-          <Pressable accessibilityRole="button" onPress={() => router.back()} style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}>
-            <ArrowLeft color={colors.onSurface} size={20} strokeWidth={2} />
-          </Pressable>
           <Text style={styles.title}>Circles Settings</Text>
-          <View style={styles.iconBtn} />
         </View>
 
         {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
@@ -231,6 +230,7 @@ export default function CirclesSettingsScreen() {
           </Pressable>
         </View>
       </ScrollView>
+      <AppDock />
     </View>
   );
 }
@@ -238,8 +238,7 @@ export default function CirclesSettingsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surface },
   scroll: { width: '100%', maxWidth: 640, alignSelf: 'center', gap: spacing.md },
-  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  iconBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.outlineVariant, backgroundColor: colors.surfaceContainerLowest, alignItems: 'center', justifyContent: 'center' },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   title: { fontFamily: fontFamily.bold, fontSize: typeScale.headlineMd, lineHeight: lineHeight(typeScale.headlineMd, 1.25), color: colors.onSurface },
   card: { borderRadius: radii.lg, borderWidth: 1, borderColor: colors.surfaceContainerHighest, backgroundColor: colors.surfaceContainerLowest, padding: spacing.md, gap: spacing.sm },
   sectionTitle: { fontFamily: fontFamily.semiBold, fontSize: typeScale.titleLg, color: colors.onSurface },

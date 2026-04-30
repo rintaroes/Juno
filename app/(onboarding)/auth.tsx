@@ -7,10 +7,10 @@ import { useOnboardingStep } from './useOnboardingStep';
 
 export default function AuthOnboardingScreen() {
   const router = useRouter();
-  useOnboardingStep(11, 'auth');
+  useOnboardingStep(10, 'auth');
 
   return (
-    <OnboardingScreen step={11} noScroll>
+    <OnboardingScreen step={10} noScroll>
       <View style={styles.main}>
         <OnboardingHeader>Let&apos;s set up your space.</OnboardingHeader>
         <OnboardingBody>

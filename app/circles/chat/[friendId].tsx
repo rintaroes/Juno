@@ -1,6 +1,6 @@
 import { ArrowLeft, PackagePlus, Send } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { listCircleMessages, listRosterForTea, sendCircleTextMessage, sendTeaPackageMessage, type CircleMessage } from '../../../lib/circleChat';
+import { CIRCLES_MESSAGING_ENABLED } from '../../../lib/featureFlags';
 import { getSupabase } from '../../../lib/supabase';
 import { useAuth } from '../../../providers/AuthProvider';
 import { colors, containerMargin, fontFamily, lineHeight, radii, spacing, typeScale } from '../../../theme';
@@ -26,6 +27,10 @@ function timeLabel(ts: string) {
 }
 
 export default function CircleChatScreen() {
+  if (!CIRCLES_MESSAGING_ENABLED) {
+    return <Redirect href="/circles/settings" />;
+  }
+
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();

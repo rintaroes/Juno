@@ -1,13 +1,18 @@
 import { ArrowLeft } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getTeaPackageDetail, type TeaPackageDetail } from '../../../lib/circleChat';
+import { CIRCLES_MESSAGING_ENABLED } from '../../../lib/featureFlags';
 import { colors, containerMargin, fontFamily, lineHeight, radii, spacing, typeScale } from '../../../theme';
 
 export default function TeaPackageDetailScreen() {
+  if (!CIRCLES_MESSAGING_ENABLED) {
+    return <Redirect href="/circles/settings" />;
+  }
+
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ teaPackageId: string }>();
