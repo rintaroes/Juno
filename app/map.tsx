@@ -3,13 +3,13 @@ import { BlurView } from 'expo-blur';
 import * as Location from 'expo-location';
 import {
   CalendarClock,
+  ChevronLeft,
   Footprints,
   Heart,
   Home,
   MapPin,
   ShieldCheck,
   Siren,
-  UserRound,
   X,
 } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -18,11 +18,15 @@ import {
   ActivityIndicator,
   Animated,
   Alert,
+  BackHandler,
+  Dimensions,
+  Easing,
   FlatList,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   PanResponder,
+  type PanResponderGestureState,
   Platform,
   Pressable,
   ScrollView,
@@ -30,7 +34,6 @@ import {
   Switch,
   Text,
   View,
-  useWindowDimensions,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import type { MapPressEvent } from 'react-native-maps/lib/MapView.types';
@@ -71,8 +74,8 @@ import {
 } from '../theme';
 
 /** Until GPS: street-level grid only (no continent view). Smaller delta = finer tile grid / more “squares”. */
-const INITIAL_MAP_LAT_DELTA = 0.008;
-const INITIAL_MAP_LNG_DELTA = 0.008;
+const INITIAL_MAP_LAT_DELTA = 0.0095;
+const INITIAL_MAP_LNG_DELTA = 0.0095;
 
 const FALLBACK_REGION: Region = {
   latitude: 39.8283,
@@ -81,25 +84,157 @@ const FALLBACK_REGION: Region = {
   longitudeDelta: INITIAL_MAP_LNG_DELTA,
 };
 
-/** Self: Find My–style — centered, tight (~block scale at mid-latitudes) */
-const SELF_SNAP_LAT_DELTA = 0.0085;
-const SELF_SNAP_LNG_DELTA = 0.0085;
+/** Self: Find My–style — centered, block-scale at mid-latitudes (slightly zoomed out vs before). */
+const SELF_SNAP_LAT_DELTA = 0.0102;
+const SELF_SNAP_LNG_DELTA = 0.0102;
 /** Friend: wider so context around them stays visible */
-const FRIEND_FOCUS_LAT_DELTA = 0.055;
-const FRIEND_FOCUS_LNG_DELTA = 0.055;
+const FRIEND_FOCUS_LAT_DELTA = 0.062;
+const FRIEND_FOCUS_LNG_DELTA = 0.062;
 /** Friend pin: animated camera duration (ms) */
 const FRIEND_PIN_FOCUS_MS = 720;
 /** Self pin / map tap / tab focus: snap to you (near-instant) */
 const SELF_PIN_FOCUS_MS = 1;
-/** Must match `styles.sheet.maxHeight` — used to offset camera so “You” sits in visible map above sheet + dock */
+/** Max expanded height; actual height shrinks with few circle members so the sheet does not leave a tall empty band above the dock. */
 const CIRCLE_SHEET_MAX_HEIGHT = 240;
 /** Keep a visible lip at dock top so users can always drag/toggle back up. */
 const CIRCLE_SHEET_PEEK_HEIGHT = 26;
-const CIRCLE_SHEET_COLLAPSED_OFFSET = CIRCLE_SHEET_MAX_HEIGHT - CIRCLE_SHEET_PEEK_HEIGHT;
-const SHEET_VELOCITY_SNAP = 0.45;
-const SHEET_BOTTOM_SNAP_DISTANCE = 52;
+/** Handle + “Circle” title (approx., matches padding + typography). */
+const CIRCLE_SHEET_HEADER_EST = 54;
+/** Floor so the sheet never looks like a sliver when expanded. */
+const CIRCLE_SHEET_MIN_EXPANDED = 118;
+const CIRCLE_SHEET_ROW_EST = 86;
+const CIRCLE_SHEET_ROW_GAP = 8;
+const CIRCLE_SHEET_BODY_PAD = 6;
+/** Max sheet height as fraction of screen when a profile is open (room for drag + peek). */
+const CIRCLE_SHEET_DETAIL_MAX_SCREEN = 0.62;
+/**
+ * Profile sheet uses a fixed pixel height (content scrolls inside). Dynamic height from layout
+ * measurements was fighting translateY + map relayout and caused visible stutter.
+ */
+/** Short enough for address + last-update rows; tall content scrolls inside (no flex-end gap tradeoff). */
+const CIRCLE_SHEET_PROFILE_SHELL_MIN = 216;
+
+function circleProfileSheetHeightPx(): number {
+  const cap = Math.floor(Dimensions.get('window').height * CIRCLE_SHEET_DETAIL_MAX_SCREEN);
+  return Math.min(cap, Math.max(CIRCLE_SHEET_MIN_EXPANDED, CIRCLE_SHEET_PROFILE_SHELL_MIN));
+}
+
+/** Stable key for reverse-geocode cache (Find My–style warm addresses for pins). */
+function geocodeCacheKey(latitude: number, longitude: number): string {
+  return `${latitude.toFixed(5)},${longitude.toFixed(5)}`;
+}
+
+function estimateCircleSheetHeight(signedIn: boolean, friendCount: number): number {
+  const header = CIRCLE_SHEET_HEADER_EST;
+  if (!signedIn) {
+    const body = 76;
+    return Math.min(
+      CIRCLE_SHEET_MAX_HEIGHT,
+      Math.max(CIRCLE_SHEET_MIN_EXPANDED, header + body),
+    );
+  }
+  if (friendCount === 0) {
+    const body = 112;
+    return Math.min(
+      CIRCLE_SHEET_MAX_HEIGHT,
+      Math.max(CIRCLE_SHEET_MIN_EXPANDED, header + body),
+    );
+  }
+  const body =
+    friendCount * CIRCLE_SHEET_ROW_EST +
+    Math.max(0, friendCount - 1) * CIRCLE_SHEET_ROW_GAP +
+    CIRCLE_SHEET_BODY_PAD;
+  return Math.min(
+    CIRCLE_SHEET_MAX_HEIGHT,
+    Math.max(CIRCLE_SHEET_MIN_EXPANDED, header + body),
+  );
+}
+/** px/ms — flick down snaps to peek like the circle list sheet. */
+const SHEET_VELOCITY_SNAP = 0.32;
+/** How close to the peek position counts as “close enough” to snap down. */
+const SHEET_BOTTOM_SNAP_DISTANCE = 72;
+/** Past this fraction of the collapse travel, release snaps to peek (same feel as circle). */
+const SHEET_SNAP_PROGRESS_COLLAPSE = 0.38;
+/** Near fully expanded — snap open unless user meant to collapse. */
+const SHEET_SNAP_PROGRESS_EXPAND = 0.12;
 /** On-map initials disc — same diameter for you and every friend */
 const MAP_PIN_MARKER_SIZE = 56;
+/** Selected friend far away: clear emphasis. */
+const MAP_PIN_FRIEND_SELECTED_FAR = 74;
+/** Selected friend ~next to you: subtle emphasis only. */
+const MAP_PIN_FRIEND_SELECTED_NEAR = 62;
+/** Within this distance (m) we skip flying the camera to a friend. */
+const FRIEND_CAMERA_SKIP_MAX_METERS = 200;
+
+function formatGeocodedAddress(a: Location.LocationGeocodedAddress): string {
+  const street = [a.streetNumber, a.street].filter(Boolean).join(' ').trim();
+  const cityLine = [a.city || a.district || a.subregion, a.region, a.postalCode, a.country]
+    .filter(Boolean)
+    .join(', ');
+  if (street && cityLine) return `${street}\n${cityLine}`;
+  if (street) return street;
+  if (cityLine) return cityLine;
+  if (a.name) return a.name;
+  return '';
+}
+
+/** True when the string is only “lat, lng” (geocode fallback) — hide from UI. */
+function isLatCommaLngOnly(s: string): boolean {
+  const line = s.trim().split('\n')[0].trim();
+  return /^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(line);
+}
+
+/** Split geocoded “street\ncity, …” into primary + secondary lines for hierarchy. */
+function splitAddressForDisplay(raw: string): { primary: string; secondary: string | null } {
+  const t = raw.trim();
+  if (!t) return { primary: '', secondary: null };
+  const nl = t.indexOf('\n');
+  if (nl === -1) return { primary: t, secondary: null };
+  const primary = t.slice(0, nl).trim();
+  const secondary = t.slice(nl + 1).trim() || null;
+  return { primary, secondary };
+}
+
+/** Snap target (0 = expanded, collapsedOffset = peek) — shared by handle, title strip, and profile scroll pull. */
+function resolveSheetSnapTarget(
+  collapsedOffset: number,
+  offsetAtGestureStart: number,
+  gestureState: PanResponderGestureState,
+): number {
+  if (collapsedOffset <= 0) return 0;
+  const clamped = Math.max(0, Math.min(collapsedOffset, offsetAtGestureStart + gestureState.dy));
+  const fastDown = gestureState.vy >= SHEET_VELOCITY_SNAP;
+  const fastUp = gestureState.vy <= -SHEET_VELOCITY_SNAP;
+  const distanceToBottom = collapsedOffset - clamped;
+  const nearBottom = distanceToBottom <= SHEET_BOTTOM_SNAP_DISTANCE;
+  const pastCollapseBias = clamped >= collapsedOffset * SHEET_SNAP_PROGRESS_COLLAPSE;
+  const nearFullExpand = clamped <= collapsedOffset * SHEET_SNAP_PROGRESS_EXPAND;
+
+  if (fastDown || nearBottom || pastCollapseBias) {
+    return collapsedOffset;
+  }
+  if (fastUp || nearFullExpand) {
+    return 0;
+  }
+  return clamped >= collapsedOffset * 0.5 ? collapsedOffset : 0;
+}
+
+function haversineMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const R = 6371000;
+  const p1 = (lat1 * Math.PI) / 180;
+  const p2 = (lat2 * Math.PI) / 180;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(p1) * Math.cos(p2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
 
 function regionForFriendFocus(latitude: number, longitude: number): Region {
   return {
@@ -256,7 +391,6 @@ function PinMarker({
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
   const mapRef = useRef<MapView>(null);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
@@ -271,6 +405,8 @@ export default function MapScreen() {
   const [locPerm, setLocPerm] = useState<'unknown' | 'granted' | 'denied'>('unknown');
   const [mapLoadError, setMapLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sheetPinLocationLine, setSheetPinLocationLine] = useState<string | null>(null);
+  const [sheetPinLocationLoading, setSheetPinLocationLoading] = useState(false);
   const [dateModalOpen, setDateModalOpen] = useState(false);
   const [roster, setRoster] = useState<RosterPerson[]>([]);
   const [rosterLoading, setRosterLoading] = useState(false);
@@ -289,46 +425,124 @@ export default function MapScreen() {
   const [shareLocationToggling, setShareLocationToggling] = useState(false);
   const [tick, setTick] = useState(0);
   const [sheetExpanded, setSheetExpanded] = useState(true);
+  /** Mirrors sheet translate so MapView mapPadding can update (ref alone does not re-render). */
+  const [sheetVisualOffset, setSheetVisualOffset] = useState(0);
+  /** Reverse-geocode lines by coordinate key — warmed when circle data loads (instant sheet like Find My). */
+  const geocodeCacheRef = useRef<Map<string, string>>(new Map());
   const sheetTranslateY = useRef(new Animated.Value(0)).current;
   const sheetOffsetRef = useRef(0);
+  /** Profile scroll offset — used so pull-down at top can drag the sheet (like the handle). */
+  const detailScrollYRef = useRef(0);
 
   const dockH = useMemo(() => getDockOuterHeight(insets.bottom), [insets.bottom]);
   /** Treat dock top as hard bottom boundary for dragging/snap. */
   const sheetBottom = dockH - 2;
-  /** Dock + circle sheet overlap the map; shift camera center south so your pin sits in the middle of the *visible* map (Find My–style). */
-  const bottomChromePx = sheetBottom + CIRCLE_SHEET_MAX_HEIGHT;
 
-  const computeSelfSnapRegion = useCallback(
-    (latitude: number, longitude: number): Region => {
-      const h = Math.max(windowHeight, 1);
-      const b = Math.min(bottomChromePx, h * 0.52);
-      const latShift = (b / (2 * h)) * SELF_SNAP_LAT_DELTA;
-      return {
-        latitude: latitude - latShift,
-        longitude,
-        latitudeDelta: SELF_SNAP_LAT_DELTA,
-        longitudeDelta: SELF_SNAP_LNG_DELTA,
-      };
-    },
-    [windowHeight, bottomChromePx],
+  const circleSheetHeight = useMemo(
+    () => estimateCircleSheetHeight(!!user?.id, friends.length),
+    [user?.id, friends.length],
+  );
+  const circleSheetHeightLive = useMemo(() => {
+    const base = circleSheetHeight;
+    if (selectedId == null) return base;
+    return circleProfileSheetHeightPx();
+  }, [circleSheetHeight, selectedId]);
+  const collapsedSheetOffset = circleSheetHeightLive - CIRCLE_SHEET_PEEK_HEIGHT;
+  /** Pixels from the bottom of the screen to the top of the circle sheet (dock + sheet − collapse). */
+  const mapBottomPaddingPx = useMemo(
+    () => Math.max(0, Math.round(sheetBottom + circleSheetHeightLive - sheetVisualOffset)),
+    [sheetBottom, circleSheetHeightLive, sheetVisualOffset],
+  );
+  const mapEdgePadding = useMemo(
+    () => ({
+      top: 0,
+      right: 0,
+      bottom: mapBottomPaddingPx,
+      left: 0,
+    }),
+    [mapBottomPaddingPx],
   );
 
+  /** Native mapPadding centers the region in the unobscured rect; keep geographic center on the user. */
+  const computeSelfSnapRegion = useCallback(
+    (latitude: number, longitude: number): Region => ({
+      latitude,
+      longitude,
+      latitudeDelta: SELF_SNAP_LAT_DELTA,
+      longitudeDelta: SELF_SNAP_LNG_DELTA,
+    }),
+    [],
+  );
+
+  /** Programmatic snap: translateY only; sheet height is fixed in profile so layout doesn’t fight the animation. */
   const animateSheetTo = useCallback(
     (toValue: number) => {
-      sheetOffsetRef.current = toValue;
-      setSheetExpanded(toValue <= 16);
-      Animated.spring(sheetTranslateY, {
-        toValue,
-        useNativeDriver: true,
-        damping: 24,
-        stiffness: 220,
-        mass: 0.9,
-      }).start();
+      const max = collapsedSheetOffset;
+      const target = Math.max(0, Math.min(max, toValue));
+      setSheetExpanded(target <= 16);
+
+      sheetTranslateY.stopAnimation((currentValue) => {
+        const start = Math.max(0, Math.min(max, Math.round(currentValue)));
+        sheetOffsetRef.current = start;
+
+        Animated.timing(sheetTranslateY, {
+          toValue: target,
+          duration: 280,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (finished) {
+            sheetOffsetRef.current = target;
+            setSheetVisualOffset(target);
+          }
+        });
+      });
     },
-    [sheetTranslateY],
+    [sheetTranslateY, collapsedSheetOffset],
   );
 
-  const sheetPanResponder = useMemo(
+  /** After opening/changing profile, expand from peek once (does not depend on collapsed remeasure). */
+  useEffect(() => {
+    if (selectedId == null) return;
+    detailScrollYRef.current = 0;
+    const frame = requestAnimationFrame(() => {
+      sheetTranslateY.stopAnimation((v) => {
+        if (Math.round(v) > 12) {
+          animateSheetTo(0);
+        }
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selectedId, animateSheetTo, sheetTranslateY]);
+
+  /** Warm reverse-geocode for every pin so opening a profile can show the address immediately. */
+  useEffect(() => {
+    const warm = (lat: number, lng: number) => {
+      const k = geocodeCacheKey(lat, lng);
+      if (geocodeCacheRef.current.has(k)) return;
+      void (async () => {
+        try {
+          const rows = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+          const a = rows[0];
+          const formatted = a ? formatGeocodedAddress(a).trim() : '';
+          geocodeCacheRef.current.set(k, formatted);
+        } catch {
+          geocodeCacheRef.current.set(k, '');
+        }
+      })();
+    };
+    if (myCoords) {
+      warm(myCoords.latitude, myCoords.longitude);
+    }
+    for (const f of friends) {
+      if (f.lat != null && f.lng != null) {
+        warm(f.lat, f.lng);
+      }
+    }
+  }, [friends, myCoords]);
+
+  /** Grab handle: claim immediately so vertical drags always move the sheet. */
+  const sheetHandleDragPan = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
@@ -337,30 +551,95 @@ export default function MapScreen() {
         onPanResponderGrant: () => {
           sheetTranslateY.stopAnimation((value) => {
             sheetOffsetRef.current = value;
+            setSheetVisualOffset(value);
           });
         },
         onPanResponderMove: (_evt, gestureState) => {
           const next = Math.max(
             0,
-            Math.min(CIRCLE_SHEET_COLLAPSED_OFFSET, sheetOffsetRef.current + gestureState.dy),
+            Math.min(collapsedSheetOffset, sheetOffsetRef.current + gestureState.dy),
           );
           sheetTranslateY.setValue(next);
         },
         onPanResponderRelease: (_evt, gestureState) => {
-          const current = sheetOffsetRef.current + gestureState.dy;
-          const clamped = Math.max(0, Math.min(CIRCLE_SHEET_COLLAPSED_OFFSET, current));
-          const fastDown = gestureState.vy >= SHEET_VELOCITY_SNAP;
-          const distanceToBottom = CIRCLE_SHEET_COLLAPSED_OFFSET - clamped;
-          const nearBottom = distanceToBottom <= SHEET_BOTTOM_SNAP_DISTANCE;
-
-          if (fastDown || nearBottom) {
-            animateSheetTo(CIRCLE_SHEET_COLLAPSED_OFFSET);
-            return;
-          }
-          animateSheetTo(0);
+          const target = resolveSheetSnapTarget(
+            collapsedSheetOffset,
+            sheetOffsetRef.current,
+            gestureState,
+          );
+          animateSheetTo(target);
         },
       }),
-    [animateSheetTo, sheetTranslateY],
+    [animateSheetTo, collapsedSheetOffset, sheetTranslateY],
+  );
+
+  /**
+   * Profile title strip: only after a vertical move threshold so the back chevron still receives taps.
+   * Same drag/snap math as the handle.
+   */
+  const sheetDetailTitleDragPan = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_evt, gestureState) =>
+          Math.abs(gestureState.dy) > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+        onPanResponderGrant: () => {
+          sheetTranslateY.stopAnimation((value) => {
+            sheetOffsetRef.current = value;
+            setSheetVisualOffset(value);
+          });
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+          const next = Math.max(
+            0,
+            Math.min(collapsedSheetOffset, sheetOffsetRef.current + gestureState.dy),
+          );
+          sheetTranslateY.setValue(next);
+        },
+        onPanResponderRelease: (_evt, gestureState) => {
+          const target = resolveSheetSnapTarget(
+            collapsedSheetOffset,
+            sheetOffsetRef.current,
+            gestureState,
+          );
+          animateSheetTo(target);
+        },
+      }),
+    [animateSheetTo, collapsedSheetOffset, sheetTranslateY],
+  );
+
+  /** When the profile scroll is at the top, capture a downward drag so the sheet moves instead of “dead” scrolling. */
+  const detailProfileScrollPullPan = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_evt, gestureState) => {
+          if (gestureState.dy <= 8) return false;
+          if (Math.abs(gestureState.dy) <= Math.abs(gestureState.dx) * 1.05) return false;
+          return detailScrollYRef.current <= 2;
+        },
+        onPanResponderGrant: () => {
+          sheetTranslateY.stopAnimation((value) => {
+            sheetOffsetRef.current = value;
+            setSheetVisualOffset(value);
+          });
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+          const next = Math.max(
+            0,
+            Math.min(collapsedSheetOffset, sheetOffsetRef.current + gestureState.dy),
+          );
+          sheetTranslateY.setValue(next);
+        },
+        onPanResponderRelease: (_evt, gestureState) => {
+          const target = resolveSheetSnapTarget(
+            collapsedSheetOffset,
+            sheetOffsetRef.current,
+            gestureState,
+          );
+          animateSheetTo(target);
+        },
+      }),
+    [animateSheetTo, collapsedSheetOffset, sheetTranslateY],
   );
 
   useEffect(() => {
@@ -446,6 +725,16 @@ export default function MapScreen() {
     },
     [computeSelfSnapRegion],
   );
+
+  /**
+   * Re-center only when the circle sheet *intrinsic height* changes (friends count / sign-in),
+   * so a taller sheet still frames “you” correctly. Dragging or expanding the sheet does not run this.
+   */
+  useEffect(() => {
+    const c = myCoordsRef.current;
+    if (!c) return;
+    scheduleSnapCameraToUser(c.latitude, c.longitude);
+  }, [circleSheetHeight, scheduleSnapCameraToUser]);
 
   const onToggleShareLocationAlways = useCallback(
     async (enabled: boolean) => {
@@ -682,24 +971,98 @@ export default function MapScreen() {
     for (const f of friends) {
       if (f.lat == null || f.lng == null) continue;
       const onDate = f.status === 'on_date';
+      const fid = `friend:${f.profile_id}`;
+      const friendSelected = selectedId === fid;
+      let markerSize = MAP_PIN_MARKER_SIZE;
+      if (friendSelected) {
+        if (myCoords) {
+          const d = haversineMeters(myCoords.latitude, myCoords.longitude, f.lat, f.lng);
+          markerSize =
+            d <= FRIEND_CAMERA_SKIP_MAX_METERS
+              ? MAP_PIN_FRIEND_SELECTED_NEAR
+              : MAP_PIN_FRIEND_SELECTED_FAR;
+        } else {
+          markerSize = MAP_PIN_FRIEND_SELECTED_FAR;
+        }
+      }
       out.push({
-        id: `friend:${f.profile_id}`,
+        id: fid,
         latitude: f.lat,
         longitude: f.lng,
         badge: onDate ? 'On a Date' : 'Circle',
         badgeVariant: onDate ? 'date' : 'glass',
         initial: initialLetter(displayName(f)),
-        markerSize: MAP_PIN_MARKER_SIZE,
+        markerSize,
       });
     }
     return out;
-  }, [friends, myCoords, myFirstName, myLive?.status, user?.id, user?.email]);
+  }, [friends, myCoords, myFirstName, myLive?.status, selectedId, user?.id, user?.email]);
 
   const selectedFriend = useMemo(() => {
     if (!selectedId?.startsWith('friend:')) return null;
     const pid = selectedId.slice('friend:'.length);
     return friends.find((f) => f.profile_id === pid) ?? null;
   }, [friends, selectedId]);
+
+  useEffect(() => {
+    if (selectedId == null) return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setSelectedId(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [selectedId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (selectedId == null) {
+      setSheetPinLocationLine(null);
+      setSheetPinLocationLoading(false);
+      return undefined;
+    }
+    const self = selectedId.startsWith('me:');
+    const lat = self ? myCoords?.latitude ?? null : selectedFriend?.lat ?? null;
+    const lng = self ? myCoords?.longitude ?? null : selectedFriend?.lng ?? null;
+    if (lat == null || lng == null) {
+      setSheetPinLocationLine(null);
+      setSheetPinLocationLoading(false);
+      return undefined;
+    }
+    const key = geocodeCacheKey(lat, lng);
+    const cached = geocodeCacheRef.current.get(key);
+    if (cached !== undefined) {
+      setSheetPinLocationLine(cached.length > 0 ? cached : '');
+      setSheetPinLocationLoading(false);
+      return undefined;
+    }
+    setSheetPinLocationLoading(true);
+    setSheetPinLocationLine(null);
+    void (async () => {
+      try {
+        const rows = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+        if (cancelled) return;
+        const a = rows[0];
+        let line = '';
+        if (a) {
+          const formatted = formatGeocodedAddress(a);
+          line = formatted.trim() ? formatted : '';
+        }
+        geocodeCacheRef.current.set(key, line);
+        setSheetPinLocationLine(line);
+      } catch {
+        if (!cancelled) {
+          geocodeCacheRef.current.set(key, '');
+          setSheetPinLocationLine('');
+        }
+      } finally {
+        if (!cancelled) setSheetPinLocationLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, selectedFriend, myCoords?.latitude, myCoords?.longitude]);
+
   const hourValues = useMemo(() => Array.from({ length: CUSTOM_HOUR_MAX + 1 }, (_, i) => i), []);
   const minuteValues = useMemo(
     () => Array.from({ length: CUSTOM_MINUTE_MAX + 1 }, (_, i) => i),
@@ -889,33 +1252,77 @@ export default function MapScreen() {
   const mapProvider = Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined;
   const mapStyle = Platform.OS === 'android' ? [...mapGoogleLightStyle] : undefined;
 
+  const focusFriendOnMap = useCallback(
+    (latitude: number, longitude: number, profileId: string) => {
+      setSelectedId(`friend:${profileId}`);
+      if (!myCoords) {
+        mapRef.current?.animateToRegion(
+          regionForFriendFocus(latitude, longitude),
+          FRIEND_PIN_FOCUS_MS,
+        );
+        return;
+      }
+      const d = haversineMeters(myCoords.latitude, myCoords.longitude, latitude, longitude);
+      if (d <= FRIEND_CAMERA_SKIP_MAX_METERS) {
+        return;
+      }
+      mapRef.current?.animateToRegion(
+        regionForFriendFocus(latitude, longitude),
+        FRIEND_PIN_FOCUS_MS,
+      );
+    },
+    [myCoords],
+  );
+
   const onOpenPin = useCallback(
     (pin: PinModel) => {
-      const isSelf = pin.id.startsWith('me:');
-      const region = isSelf
-        ? computeSelfSnapRegion(pin.latitude, pin.longitude)
-        : regionForFriendFocus(pin.latitude, pin.longitude);
-      mapRef.current?.animateToRegion(region, isSelf ? SELF_PIN_FOCUS_MS : FRIEND_PIN_FOCUS_MS);
-      setSelectedId(pin.id);
+      if (pin.id.startsWith('me:')) {
+        setSelectedId(pin.id);
+        mapRef.current?.animateToRegion(
+          computeSelfSnapRegion(pin.latitude, pin.longitude),
+          SELF_PIN_FOCUS_MS,
+        );
+        return;
+      }
+      if (!pin.id.startsWith('friend:')) return;
+      const profileId = pin.id.slice('friend:'.length);
+      focusFriendOnMap(pin.latitude, pin.longitude, profileId);
     },
-    [computeSelfSnapRegion],
+    [computeSelfSnapRegion, focusFriendOnMap],
   );
 
   const onMapPress = useCallback(
     (e: MapPressEvent) => {
       if (e.nativeEvent.action === 'marker-press') return;
       if (!myCoords) return;
-      setSelectedId(null);
+      if (selectedId != null) setSelectedId(null);
       mapRef.current?.animateToRegion(
         computeSelfSnapRegion(myCoords.latitude, myCoords.longitude),
         SELF_PIN_FOCUS_MS,
       );
     },
-    [myCoords, computeSelfSnapRegion],
+    [computeSelfSnapRegion, myCoords, selectedId],
+  );
+
+  /** Pull down at top of profile scroll → expand sheet (same idea as dragging the handle up). */
+  const handleSheetDetailScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (selectedId == null) return;
+      const y = e.nativeEvent.contentOffset.y;
+      detailScrollYRef.current = y;
+      if (y < -10 && sheetVisualOffset > 8) {
+        animateSheetTo(0);
+      }
+    },
+    [animateSheetTo, selectedId, sheetVisualOffset],
   );
 
   const detailFriend = selectedFriend;
   const detailSelf = selectedId?.startsWith('me:');
+  const sheetDetailLat =
+    detailSelf && myCoords ? myCoords.latitude : (detailFriend?.lat ?? null);
+  const sheetDetailLng =
+    detailSelf && myCoords ? myCoords.longitude : (detailFriend?.lng ?? null);
   const activeDateCountdown = timerLine(mySession?.started_at ?? null, mySession?.timer_minutes ?? null, Date.now());
 
   return (
@@ -929,14 +1336,19 @@ export default function MapScreen() {
         provider={mapProvider}
         customMapStyle={mapStyle}
         mapType="standard"
+        mapPadding={mapEdgePadding}
         showsPointsOfInterest
         showsBuildings
         showsUserLocation={false}
         toolbarEnabled={false}
+        onMapReady={() => {
+          const c = myCoordsRef.current;
+          if (c) scheduleSnapCameraToUser(c.latitude, c.longitude);
+        }}
         onPress={onMapPress}
       >
         {pins.map((p) => (
-          <PinMarker key={p.id} pin={p} onOpen={onOpenPin} />
+          <PinMarker key={`${p.id}-${p.markerSize}`} pin={p} onOpen={onOpenPin} />
         ))}
       </MapView>
 
@@ -1003,175 +1415,248 @@ export default function MapScreen() {
               bottom: sheetBottom,
               left: 0,
               right: 0,
+              height: circleSheetHeightLive,
               transform: [{ translateY: sheetTranslateY }],
             },
           ]}
         >
-          <View style={styles.sheetTint} />
-          <View style={styles.sheetHandle} {...sheetPanResponder.panHandlers}>
+          <View style={[styles.sheetTint, selectedId != null && styles.sheetTintDetail]} />
+          <View style={styles.sheetHandle} {...sheetHandleDragPan.panHandlers}>
             <View style={styles.sheetGrab} />
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={sheetExpanded ? 'Collapse circle sheet' : 'Expand circle sheet'}
               onPress={() => {
-                animateSheetTo(sheetExpanded ? CIRCLE_SHEET_COLLAPSED_OFFSET : 0);
+                animateSheetTo(sheetExpanded ? collapsedSheetOffset : 0);
               }}
               style={styles.sheetToggleHit}
             />
           </View>
-          <Text style={styles.sheetTitle}>Circle</Text>
-          <ScrollView
-            style={styles.sheetScroll}
-            contentContainerStyle={styles.sheetScrollInner}
-            showsVerticalScrollIndicator={false}
-            scrollEnabled={sheetExpanded}
-          >
-            {!user?.id ? (
-              <Text style={styles.emptyText}>Sign in to see your circle on the map.</Text>
-            ) : sortedSheet.length === 0 ? (
-              <Text style={styles.emptyText}>
-                {friends.length === 0
-                  ? 'Add accepted friends in Circles to see them here. When they share location on the Map tab, pins appear.'
-                  : 'No circle members yet.'}
-              </Text>
+          <View style={styles.sheetBody}>
+            {selectedId == null ? (
+              <>
+                <Text style={styles.sheetTitle}>Circle</Text>
+                <ScrollView
+                  style={styles.sheetScroll}
+                  contentContainerStyle={styles.sheetScrollInner}
+                  showsVerticalScrollIndicator={false}
+                  scrollEnabled={sheetExpanded}
+                >
+                  {!user?.id ? (
+                    <Text style={styles.emptyText}>Sign in to see your circle on the map.</Text>
+                  ) : sortedSheet.length === 0 ? (
+                    <Text style={styles.emptyText}>
+                      {friends.length === 0
+                        ? 'Add accepted friends in Circles to see them here. When they share location on the Map tab, pins appear.'
+                        : 'No circle members yet.'}
+                    </Text>
+                  ) : (
+                    sortedSheet.map((person) => {
+                      const name = displayName(person);
+                      const hasPin = person.lat != null && person.lng != null;
+                      const sub = !hasPin
+                        ? 'Has not shared location yet'
+                        : person.status === 'on_date'
+                          ? `With ${person.companion_display_name ?? 'someone'} · ${formatUpdated(person.updated_at)}`
+                          : `Last update ${formatUpdated(person.updated_at)}`;
+                      return (
+                        <Pressable
+                          key={person.profile_id}
+                          onPress={() => {
+                            if (hasPin && person.lat != null && person.lng != null) {
+                              focusFriendOnMap(person.lat, person.lng, person.profile_id);
+                            } else {
+                              Alert.alert(
+                                name,
+                                'They have not turned on location sharing yet. Ask them to open Map with location enabled.',
+                              );
+                            }
+                          }}
+                          style={({ pressed }) => [styles.personRow, pressed && styles.pressed]}
+                        >
+                          <View style={styles.personAvatar}>
+                            <Text style={styles.personInitial}>{initialLetter(name)}</Text>
+                            <View style={styles.personBadge}>
+                              {person.status === 'on_date' ? (
+                                <Heart color={colors.secondary} size={14} strokeWidth={2} />
+                              ) : (
+                                <Footprints color={colors.primary} size={14} strokeWidth={2} />
+                              )}
+                            </View>
+                          </View>
+                          <View style={styles.personMain}>
+                            <View style={styles.personTop}>
+                              <View style={styles.personNameCell}>
+                                <Text style={styles.personName} numberOfLines={1}>
+                                  {name}
+                                </Text>
+                              </View>
+                            </View>
+                            <Text style={styles.personSub} numberOfLines={2}>
+                              {sub}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      );
+                    })
+                  )}
+                </ScrollView>
+              </>
             ) : (
-              sortedSheet.map((person) => {
-                const name = displayName(person);
-                const hasPin = person.lat != null && person.lng != null;
-                const sub = !hasPin
-                  ? 'Has not shared location yet'
-                  : person.status === 'on_date'
-                    ? `With ${person.companion_display_name ?? 'someone'} · ${formatUpdated(person.updated_at)}`
-                    : `Last update ${formatUpdated(person.updated_at)}`;
-                return (
+              <>
+                <View style={styles.sheetInlineDetailHeader}>
                   <Pressable
-                    key={person.profile_id}
-                    onPress={() => {
-                      if (hasPin) {
-                        setSelectedId(`friend:${person.profile_id}`);
-                      } else {
-                        Alert.alert(
-                          name,
-                          'They have not turned on location sharing yet. Ask them to open Map with location enabled.',
-                        );
-                      }
-                    }}
-                    style={({ pressed }) => [
-                      styles.personRow,
-                      pressed && styles.pressed,
-                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Back to circle list"
+                    onPress={() => setSelectedId(null)}
+                    style={({ pressed }) => [styles.sheetDetailBackHit, pressed && styles.pressed]}
                   >
-                    <View style={styles.personAvatar}>
-                      <Text style={styles.personInitial}>{initialLetter(name)}</Text>
-                      <View style={styles.personBadge}>
-                        {person.status === 'on_date' ? (
-                          <Heart color={colors.secondary} size={14} strokeWidth={2} />
-                        ) : (
-                          <Footprints color={colors.primary} size={14} strokeWidth={2} />
-                        )}
-                      </View>
-                    </View>
-                    <View style={styles.personMain}>
-                      <View style={styles.personTop}>
-                        <View style={styles.personNameCell}>
-                          <Text style={styles.personName} numberOfLines={1}>
-                            {name}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text style={styles.personSub} numberOfLines={2}>
-                        {sub}
-                      </Text>
-                    </View>
+                    <ChevronLeft color={colors.onSurface} size={22} strokeWidth={2} />
                   </Pressable>
-                );
-              })
+                  <View style={styles.sheetDetailTitlePanArea} {...sheetDetailTitleDragPan.panHandlers}>
+                    <Text style={styles.sheetDetailTitle} numberOfLines={1}>
+                      {detailSelf ? 'You' : detailFriend ? displayName(detailFriend) : 'Circle'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.sheetDetailScrollPanWrap} {...detailProfileScrollPullPan.panHandlers}>
+                  <ScrollView
+                    style={styles.sheetScroll}
+                    contentContainerStyle={styles.sheetDetailScrollInner}
+                    showsVerticalScrollIndicator={false}
+                    scrollEnabled={selectedId != null || sheetExpanded}
+                    scrollEventThrottle={16}
+                    onScroll={handleSheetDetailScroll}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                  {detailSelf ? (
+                    <View style={styles.sheetDetailSection}>
+                      <Text style={styles.sheetDetailMeta}>
+                        {myLive?.status === 'on_date'
+                          ? `On a date with ${mySession?.companion_display_name ?? '…'}`
+                          : 'Sharing location with your circle while this tab is open.'}
+                      </Text>
+                      {mySession?.started_at ? (
+                        <Text style={styles.sheetDetailHint}>
+                          Started {formatSessionClock(mySession.started_at)}
+                        </Text>
+                      ) : null}
+                      {mySession?.timer_minutes ? (
+                        <Text style={styles.sheetDetailMeta}>
+                          {timerLine(mySession.started_at, mySession.timer_minutes, Date.now())}
+                        </Text>
+                      ) : null}
+                      {mySession?.companion_ai_summary ? (
+                        <View style={styles.sheetDetailSummary}>
+                          <Text style={styles.sheetDetailSummaryLabel}>Roster snapshot</Text>
+                          <Text style={styles.sheetDetailSummaryText}>{mySession.companion_ai_summary}</Text>
+                        </View>
+                      ) : null}
+                      <SheetLocationCardView
+                        loading={sheetPinLocationLoading}
+                        address={sheetPinLocationLine}
+                        muted={
+                          !sheetPinLocationLoading &&
+                          sheetDetailLat != null &&
+                          sheetDetailLng != null &&
+                          (!sheetPinLocationLine || isLatCommaLngOnly(sheetPinLocationLine))
+                            ? 'Street address couldn’t be resolved for your current pin.'
+                            : ''
+                        }
+                      />
+                    </View>
+                  ) : detailFriend ? (
+                    <View style={styles.sheetDetailSection}>
+                      {detailFriend.status === 'on_date' ? (
+                        <>
+                          <Text style={styles.sheetDetailMeta}>
+                            {`On a date with ${detailFriend.companion_display_name ?? 'someone'}`}
+                          </Text>
+                          {detailFriend.session_started_at ? (
+                            <Text style={styles.sheetDetailHint}>
+                              Date started {formatSessionClock(detailFriend.session_started_at)}
+                            </Text>
+                          ) : null}
+                          {detailFriend.session_started_at && detailFriend.timer_minutes ? (
+                            <Text style={styles.sheetDetailMeta}>
+                              {timerLine(
+                                detailFriend.session_started_at,
+                                detailFriend.timer_minutes,
+                                Date.now(),
+                              )}
+                            </Text>
+                          ) : null}
+                          {detailFriend.companion_ai_summary ? (
+                            <View style={styles.sheetDetailSummary}>
+                              <Text style={styles.sheetDetailSummaryLabel}>Their roster snapshot</Text>
+                              <Text style={styles.sheetDetailSummaryText}>
+                                {detailFriend.companion_ai_summary}
+                              </Text>
+                            </View>
+                          ) : null}
+                          <SheetLocationCardView
+                            loading={sheetPinLocationLoading}
+                            address={sheetPinLocationLine}
+                            muted={
+                              !sheetPinLocationLoading &&
+                              sheetDetailLat != null &&
+                              sheetDetailLng != null &&
+                              (!sheetPinLocationLine || isLatCommaLngOnly(sheetPinLocationLine))
+                                ? 'Street address couldn’t be resolved for their pin.'
+                                : !sheetPinLocationLoading &&
+                                    (sheetDetailLat == null || sheetDetailLng == null)
+                                  ? 'They haven’t shared a location yet.'
+                                  : ''
+                            }
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <SheetLocationCardView
+                            loading={sheetPinLocationLoading}
+                            address={sheetPinLocationLine}
+                            muted={
+                              !sheetPinLocationLoading &&
+                              sheetDetailLat != null &&
+                              sheetDetailLng != null &&
+                              (!sheetPinLocationLine || isLatCommaLngOnly(sheetPinLocationLine))
+                                ? 'Street address couldn’t be resolved for their pin.'
+                                : !sheetPinLocationLoading &&
+                                    (sheetDetailLat == null || sheetDetailLng == null)
+                                  ? 'They haven’t shared a location yet.'
+                                  : ''
+                            }
+                          />
+                          <View style={styles.sheetUpdatedRow}>
+                            <CalendarClock
+                              color={colors.onSurfaceVariant}
+                              size={16}
+                              strokeWidth={2}
+                            />
+                            <Text style={styles.sheetLastUpdatedInline}>
+                              Last update {formatUpdated(detailFriend.updated_at)}
+                            </Text>
+                          </View>
+                          {detailFriend.companion_ai_summary ? (
+                            <View style={styles.sheetDetailSummary}>
+                              <Text style={styles.sheetDetailSummaryLabel}>Their roster snapshot</Text>
+                              <Text style={styles.sheetDetailSummaryText}>
+                                {detailFriend.companion_ai_summary}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </>
+                      )}
+                    </View>
+                  ) : null}
+                  </ScrollView>
+                </View>
+              </>
             )}
-          </ScrollView>
+          </View>
         </Animated.View>
 
       </View>
-
-      <Modal
-        visible={selectedId != null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSelectedId(null)}
-      >
-        <Pressable style={styles.modalBackdrop} onPress={() => setSelectedId(null)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {detailSelf ? 'You' : detailFriend ? displayName(detailFriend) : 'Circle'}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-                onPress={() => setSelectedId(null)}
-                style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-              >
-                <X color={colors.onSurface} size={22} strokeWidth={2} />
-              </Pressable>
-            </View>
-            {detailSelf ? (
-              <View style={styles.modalBody}>
-                <Text style={styles.modalMeta}>
-                  {myLive?.status === 'on_date'
-                    ? `On a date with ${mySession?.companion_display_name ?? '…'}`
-                    : 'Sharing location with your circle while this tab is open.'}
-                </Text>
-                {mySession?.started_at ? (
-                  <Text style={styles.modalHint}>
-                    Started {formatSessionClock(mySession.started_at)}
-                  </Text>
-                ) : null}
-                {mySession?.timer_minutes ? (
-                  <Text style={styles.modalMeta}>
-                    {timerLine(mySession.started_at, mySession.timer_minutes, Date.now())}
-                  </Text>
-                ) : null}
-                {mySession?.companion_ai_summary ? (
-                  <View style={styles.summaryBlock}>
-                    <Text style={styles.summaryLabel}>Roster snapshot</Text>
-                    <Text style={styles.summaryText}>{mySession.companion_ai_summary}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : detailFriend ? (
-              <View style={styles.modalBody}>
-                <Text style={styles.modalMeta}>
-                  {detailFriend.status === 'on_date'
-                    ? `On a date with ${detailFriend.companion_display_name ?? 'someone'}`
-                    : 'Available — location shared with you.'}
-                </Text>
-                {detailFriend.session_started_at ? (
-                  <Text style={styles.modalHint}>
-                    Date started {formatSessionClock(detailFriend.session_started_at)}
-                  </Text>
-                ) : null}
-                {detailFriend.session_started_at && detailFriend.timer_minutes ? (
-                  <Text style={styles.modalMeta}>
-                    {timerLine(
-                      detailFriend.session_started_at,
-                      detailFriend.timer_minutes,
-                      Date.now(),
-                    )}
-                  </Text>
-                ) : null}
-                {detailFriend.companion_ai_summary ? (
-                  <View style={styles.summaryBlock}>
-                    <Text style={styles.summaryLabel}>Their roster snapshot</Text>
-                    <Text style={styles.summaryText}>{detailFriend.companion_ai_summary}</Text>
-                  </View>
-                ) : null}
-                <Text style={styles.modalHint}>
-                  Last location update: {formatUpdated(detailFriend.updated_at)}
-                </Text>
-              </View>
-            ) : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       <Modal visible={dateModalOpen} animationType="slide" onRequestClose={onCloseDateModal}>
         <View style={[styles.dateModalScreen, { paddingTop: insets.top + spacing.md }]}>
@@ -1565,17 +2050,21 @@ const styles = StyleSheet.create({
   sheet: {
     position: 'absolute',
     zIndex: 120,
-    height: CIRCLE_SHEET_MAX_HEIGHT,
     borderTopLeftRadius: radii.dockTop,
     borderTopRightRadius: radii.dockTop,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
     overflow: 'hidden',
+    flexDirection: 'column',
   },
   sheetTint: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.white,
     borderWidth: 0,
+  },
+  /** Match circle list row cards so the profile readout feels like the same “popup”, not a tall white slab. */
+  sheetTintDetail: {
+    backgroundColor: colors.surfaceContainerLowest,
   },
   sheetHandle: {
     paddingVertical: 10,
@@ -1604,6 +2093,100 @@ const styles = StyleSheet.create({
   },
   sheetScroll: {
     flex: 1,
+  },
+  sheetBody: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  /** Wraps profile ScrollView so pull-down-at-top can drag the sheet (PanResponder capture). */
+  sheetDetailScrollPanWrap: {
+    flex: 1,
+    minHeight: 0,
+  },
+  sheetInlineDetailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: containerMargin,
+    paddingBottom: spacing.xs,
+    gap: 6,
+  },
+  sheetDetailSection: {
+    gap: 4,
+  },
+  sheetDetailMeta: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelMd,
+    lineHeight: lineHeight(typeScale.labelMd, 1.42),
+    color: colors.onSurfaceVariant,
+  },
+  sheetDetailHint: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelSm,
+    lineHeight: lineHeight(typeScale.labelSm, 1.38),
+    color: colors.tertiary,
+  },
+  /** Location: typography only + hairline — same restraint as the circle list (no tinted “card”). */
+  sheetLocationPlain: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.outlineVariant,
+    gap: spacing.xs,
+  },
+  sheetUpdatedRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: spacing.md,
+    paddingHorizontal: 2,
+  },
+  sheetLastUpdatedInline: {
+    flex: 1,
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelSm,
+    lineHeight: lineHeight(typeScale.labelSm, 1.45),
+    color: colors.onSurfaceVariant,
+  },
+  sheetDetailSummary: {
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceContainerLow,
+    gap: 4,
+  },
+  sheetDetailSummaryLabel: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelSm,
+    color: colors.onSurfaceVariant,
+  },
+  sheetDetailSummaryText: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelSm,
+    lineHeight: lineHeight(typeScale.labelSm, 1.42),
+    color: colors.onSurface,
+  },
+  sheetDetailBackHit: {
+    padding: 6,
+    marginRight: 2,
+  },
+  sheetDetailTitlePanArea: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  sheetDetailTitle: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.35),
+    color: colors.onSurface,
+  },
+  sheetDetailScrollInner: {
+    paddingHorizontal: containerMargin,
+    paddingBottom: spacing.xs,
+    gap: 4,
   },
   sheetScrollInner: {
     paddingHorizontal: 12,
@@ -1754,34 +2337,6 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.86,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-    justifyContent: 'center',
-    paddingHorizontal: containerMargin,
-  },
-  modalCard: {
-    borderRadius: radii.lg,
-    backgroundColor: colors.surfaceContainerLowest,
-    padding: spacing.lg,
-    maxWidth: 400,
-    alignSelf: 'center',
-    width: '100%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
-  },
-  modalTitle: {
-    fontFamily: fontFamily.bold,
-    fontSize: typeScale.titleLg,
-    color: colors.onSurface,
-  },
-  iconBtn: {
-    padding: 4,
   },
   modalBody: {
     gap: spacing.sm,
@@ -2163,3 +2718,34 @@ const styles = StyleSheet.create({
     color: colors.onPrimary,
   },
 });
+
+type SheetLocationCardViewProps = {
+  loading: boolean;
+  address: string | null;
+  muted: string | null | undefined;
+};
+
+function SheetLocationCardView({ loading, address, muted }: SheetLocationCardViewProps) {
+  const trimmedMuted = (muted ?? '').trim();
+  const lines =
+    !loading && address && !isLatCommaLngOnly(address) ? splitAddressForDisplay(address) : null;
+
+  if (!loading && !lines?.primary && !trimmedMuted) {
+    return null;
+  }
+
+  return (
+    <View style={styles.sheetLocationPlain}>
+      {loading ? (
+        <Text style={styles.personSub}>Getting address…</Text>
+      ) : lines?.primary ? (
+        <View style={styles.sheetDetailSection}>
+          <Text style={styles.personName}>{lines.primary}</Text>
+          {lines.secondary ? <Text style={styles.personSub}>{lines.secondary}</Text> : null}
+        </View>
+      ) : trimmedMuted ? (
+        <Text style={styles.personSub}>{trimmedMuted}</Text>
+      ) : null}
+    </View>
+  );
+}
