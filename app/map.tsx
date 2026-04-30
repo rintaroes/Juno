@@ -151,12 +151,16 @@ function estimateCircleSheetHeight(signedIn: boolean, friendCount: number): numb
 }
 /** px/ms — flick down snaps to peek like the circle list sheet. */
 const SHEET_VELOCITY_SNAP = 0.32;
+/** Upward flick snaps fully open (lower bar than collapse; swipe-up should “go all the way”). */
+const SHEET_VELOCITY_SNAP_EXPAND = 0.14;
+/** Net finger movement up (px) from gesture start → snap fully expanded. */
+const SHEET_SWIPE_UP_DRAG_COMMIT_PX = 28;
 /** How close to the peek position counts as “close enough” to snap down. */
 const SHEET_BOTTOM_SNAP_DISTANCE = 72;
 /** Past this fraction of the collapse travel, release snaps to peek (same feel as circle). */
 const SHEET_SNAP_PROGRESS_COLLAPSE = 0.38;
-/** Near fully expanded — snap open unless user meant to collapse. */
-const SHEET_SNAP_PROGRESS_EXPAND = 0.12;
+/** Near fully expanded — snap open (fraction of collapsed offset from 0). */
+const SHEET_SNAP_PROGRESS_EXPAND = 0.26;
 /** On-map initials disc — same diameter for you and every friend */
 const MAP_PIN_MARKER_SIZE = 56;
 /** Selected friend far away: clear emphasis. */
@@ -210,11 +214,18 @@ function resolveSheetSnapTarget(
   const pastCollapseBias = clamped >= collapsedOffset * SHEET_SNAP_PROGRESS_COLLAPSE;
   const nearFullExpand = clamped <= collapsedOffset * SHEET_SNAP_PROGRESS_EXPAND;
 
+  /** Upward intent: must win before nearBottom/pastCollapseBias (those treat “still near peek” as snap down). */
+  const swipeExpand =
+    gestureState.dy <= -SHEET_SWIPE_UP_DRAG_COMMIT_PX ||
+    gestureState.vy <= -SHEET_VELOCITY_SNAP_EXPAND ||
+    fastUp ||
+    nearFullExpand;
+
+  if (swipeExpand) {
+    return 0;
+  }
   if (fastDown || nearBottom || pastCollapseBias) {
     return collapsedOffset;
-  }
-  if (fastUp || nearFullExpand) {
-    return 0;
   }
   return clamped >= collapsedOffset * 0.5 ? collapsedOffset : 0;
 }
@@ -608,13 +619,19 @@ export default function MapScreen() {
     [animateSheetTo, collapsedSheetOffset, sheetTranslateY],
   );
 
-  /** When the profile scroll is at the top, capture a downward drag so the sheet moves instead of “dead” scrolling. */
+  /**
+   * When the profile scroll is at the top, capture vertical drags so the sheet moves (same as handle /
+   * circle sheet): pull down to peek, pull up to expand. `dy <= 8` would reject all upward motion — use
+   * `Math.abs(dy)` like `sheetDetailTitleDragPan`.
+   */
   const detailProfileScrollPullPan = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponderCapture: (_evt, gestureState) => {
-          if (gestureState.dy <= 8) return false;
+          if (Math.abs(gestureState.dy) <= 8) return false;
           if (Math.abs(gestureState.dy) <= Math.abs(gestureState.dx) * 1.05) return false;
+          // Collapsed: ScrollView is off (same as circle) — always drag the sheet; ignore stale scroll Y.
+          if (!sheetExpanded) return true;
           return detailScrollYRef.current <= 2;
         },
         onPanResponderGrant: () => {
@@ -639,7 +656,7 @@ export default function MapScreen() {
           animateSheetTo(target);
         },
       }),
-    [animateSheetTo, collapsedSheetOffset, sheetTranslateY],
+    [animateSheetTo, collapsedSheetOffset, sheetExpanded, sheetTranslateY],
   );
 
   useEffect(() => {
@@ -1524,7 +1541,8 @@ export default function MapScreen() {
                     style={styles.sheetScroll}
                     contentContainerStyle={styles.sheetDetailScrollInner}
                     showsVerticalScrollIndicator={false}
-                    scrollEnabled={selectedId != null || sheetExpanded}
+                    scrollEnabled={sheetExpanded}
+                    alwaysBounceVertical={sheetExpanded}
                     scrollEventThrottle={16}
                     onScroll={handleSheetDetailScroll}
                     keyboardShouldPersistTaps="handled"
