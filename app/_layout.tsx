@@ -89,11 +89,11 @@ function RootNavigator() {
     return <AppErrorState message={error} onRetry={clearError} />;
   }
 
-  if (!onboardingCompleted && !inOnboardingGroup) {
+  if (!session && !onboardingCompleted && !inOnboardingGroup && !inAuthGroup) {
     return <Redirect href="/(onboarding)/characters/welcome" />;
   }
 
-  if (!onboardingCompleted && inOnboardingGroup) {
+  if (!session && !onboardingCompleted && inOnboardingGroup) {
     return (
       <Stack
         screenOptions={{

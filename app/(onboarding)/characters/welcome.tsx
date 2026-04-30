@@ -29,7 +29,15 @@ export default function WelcomeScreen() {
         <OnboardingButton
           variant="ghost"
           label="Already have an account? Sign in"
-          onPress={() => router.push('/auth')}
+          onPress={() =>
+            router.push({
+              pathname: '/auth',
+              params: {
+                fromOnboarding: '1',
+                returnTo: '/(onboarding)/characters/welcome',
+              },
+            })
+          }
         />
       </View>
     </OnboardingScreen>

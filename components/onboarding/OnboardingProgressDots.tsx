@@ -3,7 +3,7 @@ import { colors, spacing } from '../../theme';
 
 type Props = { currentStep: number; totalSteps?: number };
 
-export function OnboardingProgressDots({ currentStep, totalSteps = 16 }: Props) {
+export function OnboardingProgressDots({ currentStep, totalSteps = 14 }: Props) {
   return (
     <View style={styles.row}>
       {Array.from({ length: totalSteps }).map((_, index) => {

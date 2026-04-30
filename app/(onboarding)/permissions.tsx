@@ -15,6 +15,7 @@ export default function PermissionsScreen() {
   const router = useRouter();
   const permissions = useOnboardingStore((state) => state.permissions);
   const setPermission = useOnboardingStore((state) => state.setPermission);
+  const markCompleted = useOnboardingStore((state) => state.markCompleted);
   useOnboardingStep(14, 'permissions');
 
   const request = async (key: 'location' | 'notifications' | 'contacts') => {
@@ -62,7 +63,12 @@ export default function PermissionsScreen() {
           onPress={() => void request('contacts')}
         />
       </View>
-      <OnboardingButton label="Continue" onPress={() => router.push('/(onboarding)/characters/first-check')} />
+      <OnboardingButton
+        label="Continue"
+        onPress={() => {
+          void markCompleted().then(() => router.replace('/'));
+        }}
+      />
     </OnboardingScreen>
   );
 }

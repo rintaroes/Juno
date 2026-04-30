@@ -45,7 +45,7 @@ function identityLabel(profile: {
 export default function CirclesSettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const resetOnboarding = useOnboardingStore((state) => state.resetOnboarding);
   const dockH = useMemo(() => getDockOuterHeight(insets.bottom), [insets.bottom]);
   const [loading, setLoading] = useState(true);
@@ -144,11 +144,12 @@ export default function CirclesSettingsScreen() {
     try {
       setErrorMsg(null);
       await resetOnboarding();
+      await signOut();
       router.replace('/(onboarding)/characters/welcome');
     } catch (error) {
       setErrorMsg(error instanceof Error ? error.message : 'Failed to reset onboarding.');
     }
-  }, [resetOnboarding, router]);
+  }, [resetOnboarding, router, signOut]);
 
   return (
     <View style={styles.screen}>

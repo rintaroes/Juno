@@ -9,7 +9,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Redirect } from 'expo-router';
+import { ArrowLeft } from 'lucide-react-native';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { AppErrorState } from '../components/AppErrorState';
 import { AppLoading } from '../components/AppLoading';
 import { getSupabase } from '../lib/supabase';
@@ -19,6 +20,14 @@ import { colors, fontFamily, lineHeight, radii, spacing, typeScale } from '../th
 type Mode = 'sign_in' | 'sign_up';
 
 export default function AuthScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ fromOnboarding?: string; returnTo?: string }>();
+  const fromOnboardingRaw = Array.isArray(params.fromOnboarding)
+    ? params.fromOnboarding[0]
+    : params.fromOnboarding;
+  const returnToRaw = Array.isArray(params.returnTo) ? params.returnTo[0] : params.returnTo;
+  const isFromOnboarding = fromOnboardingRaw === '1';
+  const returnTo = returnToRaw || '/(onboarding)/characters/welcome';
   const { session, loading } = useAuth();
   const [mode, setMode] = useState<Mode>('sign_in');
   const [email, setEmail] = useState('');
@@ -82,6 +91,16 @@ export default function AuthScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.card}>
+            {isFromOnboarding ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => router.replace(returnTo)}
+                style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
+              >
+                <ArrowLeft color={colors.onSurface} size={18} strokeWidth={2} />
+                <Text style={styles.backLabel}>Back</Text>
+              </Pressable>
+            ) : null}
             <Text style={styles.brand}>Juno</Text>
             <Text style={styles.title}>
               {mode === 'sign_up' ? 'Create your account' : 'Sign in'}
@@ -176,6 +195,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.outlineVariant,
     backgroundColor: colors.surfaceContainerLowest,
+  },
+  backBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  backLabel: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelMd,
+    color: colors.onSurface,
   },
   brand: {
     textAlign: 'center',

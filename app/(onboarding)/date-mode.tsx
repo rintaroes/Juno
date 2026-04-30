@@ -25,7 +25,7 @@ export default function DateModeScreen() {
           <Text style={styles.caption}>Your circle is watching</Text>
         </View>
       </View>
-      <OnboardingButton label="Continue" onPress={() => router.push('/(onboarding)/auth')} />
+      <OnboardingButton label="Continue" onPress={() => router.push('/(onboarding)/setup-account')} />
     </OnboardingScreen>
   );
 }
