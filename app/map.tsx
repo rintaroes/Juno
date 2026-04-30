@@ -26,7 +26,6 @@ import {
   StyleSheet,
   Switch,
   Text,
-  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -251,7 +250,6 @@ export default function MapScreen() {
   const lastServerPush = useRef(0);
   const myCoordsRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
-  const [query, setQuery] = useState('');
   const [friends, setFriends] = useState<FriendMapSnapshot[]>([]);
   const [myCoords, setMyCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [myFirstName, setMyFirstName] = useState<string | null>(null);
@@ -622,24 +620,14 @@ export default function MapScreen() {
     ]),
   );
 
-  const filteredFriends = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return friends;
-    return friends.filter((f) => {
-      const n = displayName(f).toLowerCase();
-      const u = (f.username ?? '').toLowerCase();
-      return n.includes(q) || u.includes(q);
-    });
-  }, [friends, query]);
-
   const sortedSheet = useMemo(
     () =>
-      [...filteredFriends].sort((a, b) => {
+      [...friends].sort((a, b) => {
         const da = a.status === 'on_date' ? 0 : 1;
         const db = b.status === 'on_date' ? 0 : 1;
         return da - db || displayName(a).localeCompare(displayName(b));
       }),
-    [filteredFriends],
+    [friends],
   );
 
   const pins: PinModel[] = useMemo(() => {
@@ -860,30 +848,6 @@ export default function MapScreen() {
           </View>
         ) : null}
 
-        <View
-          style={[
-            styles.searchWrap,
-            {
-              top: insets.top + (locPerm === 'denied' || mapLoadError ? 72 : spacing.sm),
-              left: containerMargin,
-              right: containerMargin,
-            },
-          ]}
-        >
-          <BlurView intensity={45} tint="light" style={StyleSheet.absoluteFill} />
-          <View style={styles.searchGlass} />
-          <View style={styles.searchInner}>
-            <UserRound color={colors.primary} size={22} strokeWidth={2} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search your circle…"
-              placeholderTextColor={colors.outline}
-              style={styles.searchInput}
-            />
-          </View>
-        </View>
-
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Date mode"
@@ -891,7 +855,7 @@ export default function MapScreen() {
           style={({ pressed }) => [
             styles.dateFab,
             {
-              top: insets.top + (locPerm === 'denied' || mapLoadError ? 128 : 68),
+              top: insets.top + (locPerm === 'denied' || mapLoadError ? 72 : spacing.sm),
               right: containerMargin,
             },
             pressed && styles.pressed,
@@ -931,34 +895,13 @@ export default function MapScreen() {
             showsVerticalScrollIndicator={false}
             scrollEnabled={sheetExpanded}
           >
-            {user?.id && Platform.OS !== 'web' ? (
-              <View style={styles.shareAlwaysRow}>
-                <View style={styles.shareAlwaysTextCol}>
-                  <Text style={styles.shareAlwaysTitle}>Always share location</Text>
-                  <Text style={styles.shareAlwaysHint}>
-                    Updates your circle when Juno is in the background — like Life360. Uses more
-                    battery; Android shows a status notification while active.
-                  </Text>
-                </View>
-                <Switch
-                  accessibilityLabel="Always share location with your circle"
-                  value={shareLocationAlways}
-                  disabled={shareLocationToggling || locPerm === 'denied'}
-                  onValueChange={(v) => {
-                    void onToggleShareLocationAlways(v);
-                  }}
-                  trackColor={{ false: colors.outlineVariant, true: colors.primaryContainer }}
-                  thumbColor={Platform.OS === 'android' ? colors.surfaceContainerLowest : undefined}
-                />
-              </View>
-            ) : null}
             {!user?.id ? (
               <Text style={styles.emptyText}>Sign in to see your circle on the map.</Text>
             ) : sortedSheet.length === 0 ? (
               <Text style={styles.emptyText}>
                 {friends.length === 0
                   ? 'Add accepted friends in Circles to see them here. When they share location on the Map tab, pins appear.'
-                  : 'No one matches your search.'}
+                  : 'No circle members yet.'}
               </Text>
             ) : (
               sortedSheet.map((person) => {
@@ -1270,44 +1213,6 @@ const styles = StyleSheet.create({
     lineHeight: lineHeight(typeScale.labelSm, 1.4),
     color: colors.onSurface,
   },
-  searchWrap: {
-    position: 'absolute',
-    zIndex: 30,
-    borderRadius: radii.full,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 20,
-      },
-      android: { elevation: 5 },
-      default: {},
-    }),
-  },
-  searchGlass: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.88)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
-  },
-  searchInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
-    gap: spacing.sm,
-  },
-  searchInput: {
-    flex: 1,
-    fontFamily: fontFamily.regular,
-    fontSize: typeScale.bodyMd,
-    lineHeight: lineHeight(typeScale.bodyMd, 1.5),
-    color: colors.onSurface,
-    padding: 0,
-    margin: 0,
-  },
   dateFab: {
     position: 'absolute',
     zIndex: 31,
@@ -1383,33 +1288,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingBottom: 4,
     gap: 8,
-  },
-  shareAlwaysRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: 4,
-    marginBottom: spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.outlineVariant,
-  },
-  shareAlwaysTextCol: {
-    flex: 1,
-    minWidth: 0,
-    paddingRight: 4,
-  },
-  shareAlwaysTitle: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelMd,
-    color: colors.onSurface,
-    marginBottom: 4,
-  },
-  shareAlwaysHint: {
-    fontFamily: fontFamily.regular,
-    fontSize: typeScale.labelSm,
-    lineHeight: lineHeight(typeScale.labelSm, 1.38),
-    color: colors.onSurfaceVariant,
   },
   emptyText: {
     fontFamily: fontFamily.regular,

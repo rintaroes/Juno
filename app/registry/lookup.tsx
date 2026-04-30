@@ -109,7 +109,9 @@ export default function RegistryLookupScreen() {
         <Text style={styles.lead}>
           Search by name. Add age, state, or zip to narrow results. Lookup runs on our servers; your
           search stays private.
-          {rosterPersonId ? ' This check will be linked to the open roster profile.' : ''}
+          {rosterPersonId
+            ? ' If records appear, you will decide whether to link this check to the open roster profile.'
+            : ''}
         </Text>
 
         <View style={[styles.card, ambientCard]}>

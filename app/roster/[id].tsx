@@ -425,7 +425,8 @@ export default function RosterPersonScreen() {
               <View style={styles.chatSection}>
                 <Text style={styles.chatSectionTitle}>Registry checks</Text>
                 <Text style={styles.chatSectionHint}>
-                  Linked lookups from Protect. Run a check for this person anytime.
+                  Linked lookups from Protect. Each registry result requires explicit confirmation
+                  before it is attached here.
                 </Text>
                 <Pressable
                   accessibilityRole="button"

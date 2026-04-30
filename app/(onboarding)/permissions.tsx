@@ -66,7 +66,7 @@ export default function PermissionsScreen() {
       <OnboardingButton
         label="Continue"
         onPress={() => {
-          void markCompleted().then(() => router.replace('/'));
+          void markCompleted().then(() => router.replace('/map'));
         }}
       />
     </OnboardingScreen>

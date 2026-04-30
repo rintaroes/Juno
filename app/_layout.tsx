@@ -109,7 +109,7 @@ function RootNavigator() {
   }
 
   if (session && inAuthGroup) {
-    return <Redirect href="/" />;
+    return <Redirect href="/map" />;
   }
 
   return (

@@ -2,6 +2,16 @@ import { getSupabase } from './supabase';
 import type { Tables, TablesUpdate } from './database.types';
 
 export type RegistryCheck = Tables<'registry_checks'>;
+type LinkRegistryInput = {
+  rosterPersonId: string;
+  selectedMatch?: {
+    name: string;
+    dob?: string | null;
+    state?: string | null;
+    zip?: string | null;
+    mugshotUrl?: string | null;
+  } | null;
+};
 
 export async function getRegistryCheck(ownerId: string, checkId: string) {
   const { data, error } = await getSupabase()
@@ -32,9 +42,16 @@ export async function listRegistryChecksForRoster(
 export async function linkRegistryCheckToRoster(
   ownerId: string,
   checkId: string,
-  rosterPersonId: string,
+  input: LinkRegistryInput,
 ) {
-  const patch: TablesUpdate<'registry_checks'> = { roster_person_id: rosterPersonId };
+  const patch: TablesUpdate<'registry_checks'> = {
+    roster_person_id: input.rosterPersonId,
+    matched_name: input.selectedMatch?.name?.trim() || null,
+    matched_dob: input.selectedMatch?.dob?.trim()?.slice(0, 10) || null,
+    matched_state: input.selectedMatch?.state?.trim() || null,
+    matched_zip: input.selectedMatch?.zip?.trim() || null,
+    mugshot_url: input.selectedMatch?.mugshotUrl?.trim() || null,
+  };
   const { data, error } = await getSupabase()
     .from('registry_checks')
     .update(patch)

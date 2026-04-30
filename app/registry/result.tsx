@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, memo } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Modal,
@@ -152,6 +153,10 @@ function formatMatchMeta(m: RegistryMatch) {
   return [matchAgeLabel(m), m.state, m.zip].filter(Boolean).join(' · ') || '—';
 }
 
+function matchKey(m: RegistryMatch, index: number) {
+  return m.sourceId ?? `${m.name}-${m.dob ?? ''}-${m.zip ?? ''}-${index}`;
+}
+
 const MatchMugshotOrDefault = memo(function MatchMugshotOrDefault({
   name,
   mugshotUrl,
@@ -223,12 +228,18 @@ export default function RegistryResultScreen() {
   const [facePreviewUrl, setFacePreviewUrl] = useState<string | null>(null);
   const [roster, setRoster] = useState<RosterPerson[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [decision, setDecision] = useState<'unset' | 'false_positive' | 'confirmed_match'>('unset');
+  const [selectedMatchKey, setSelectedMatchKey] = useState<string | null>(null);
 
   const matches = useMemo(() => parseMatches(row), [row]);
   const sortedMatches = useMemo(
     () => sortMatchesWithPhotosFirst(dedupeMatches(matches)),
     [matches],
   );
+  const selectedMatch = useMemo(() => {
+    if (!selectedMatchKey) return null;
+    return sortedMatches.find((m, index) => matchKey(m, index) === selectedMatchKey) ?? null;
+  }, [selectedMatchKey, sortedMatches]);
 
   useEffect(() => {
     const run = async () => {
@@ -259,6 +270,12 @@ export default function RegistryResultScreen() {
   const queryCity = (
     row?.raw_result as { input?: { city?: string | null } } | null | undefined
   )?.input?.city?.trim();
+  const queryDob = (
+    row?.raw_result as { input?: { dob?: string | null } } | null | undefined
+  )?.input?.dob?.trim();
+  const requestedRosterPersonId = (
+    row?.raw_result as { input?: { requestedRosterPersonId?: string | null } } | null | undefined
+  )?.input?.requestedRosterPersonId?.trim();
 
   const openMerge = useCallback(async () => {
     if (!user?.id) return;
@@ -284,13 +301,16 @@ export default function RegistryResultScreen() {
         owner_id: user.id,
         display_name: row.query_name,
         estimated_age: row.query_age,
-        dob: row.matched_dob ?? null,
-        state: row.matched_state ?? row.query_state,
-        zip: row.matched_zip ?? row.query_zip,
+        dob: queryDob || null,
+        state: row.query_state,
+        zip: row.query_zip,
         notes: null,
         source: 'registry_lookup',
       });
-      const linked = await linkRegistryCheckToRoster(user.id, row.id, person.id);
+      const linked = await linkRegistryCheckToRoster(user.id, row.id, {
+        rosterPersonId: person.id,
+        selectedMatch: decision === 'confirmed_match' ? selectedMatch : null,
+      });
       setRow(linked);
       router.replace(`/roster/${person.id}`);
     } catch (e) {
@@ -298,7 +318,7 @@ export default function RegistryResultScreen() {
     } finally {
       setSaving(false);
     }
-  }, [row, router, saving, user?.id]);
+  }, [decision, queryDob, row, router, saving, selectedMatch, user?.id]);
 
   const mergeInto = useCallback(
     async (personId: string) => {
@@ -306,7 +326,10 @@ export default function RegistryResultScreen() {
       setSaving(true);
       setMergeOpen(false);
       try {
-        await linkRegistryCheckToRoster(user.id, row.id, personId);
+        await linkRegistryCheckToRoster(user.id, row.id, {
+          rosterPersonId: personId,
+          selectedMatch: decision === 'confirmed_match' ? selectedMatch : null,
+        });
         router.replace(`/roster/${personId}`);
       } catch (e) {
         setLoadError(e instanceof Error ? e.message : 'Could not link to roster.');
@@ -314,8 +337,42 @@ export default function RegistryResultScreen() {
         setSaving(false);
       }
     },
-    [row, router, saving, user?.id],
+    [decision, row, router, saving, selectedMatch, user?.id],
   );
+
+  const linkToRequestedRoster = useCallback(async () => {
+    if (!user?.id || !row || !requestedRosterPersonId || saving) return;
+    setSaving(true);
+    try {
+      await linkRegistryCheckToRoster(user.id, row.id, {
+        rosterPersonId: requestedRosterPersonId,
+        selectedMatch: decision === 'confirmed_match' ? selectedMatch : null,
+      });
+      router.replace(`/roster/${requestedRosterPersonId}`);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Could not link to roster.');
+    } finally {
+      setSaving(false);
+    }
+  }, [decision, requestedRosterPersonId, row, router, saving, selectedMatch, user?.id]);
+
+  const onCancelDate = useCallback(() => {
+    Alert.alert(
+      'Cancel this date?',
+      'This keeps the registry check in your private history, but does not add this person to your roster.',
+      [
+        { text: 'Back', style: 'cancel' },
+        {
+          text: 'Cancel date',
+          style: 'destructive',
+          onPress: () => {
+            if (requestedRosterPersonId) router.replace(`/roster/${requestedRosterPersonId}`);
+            else router.replace('/roster');
+          },
+        },
+      ],
+    );
+  }, [requestedRosterPersonId, router]);
 
   if (loading) {
     return (
@@ -347,6 +404,12 @@ export default function RegistryResultScreen() {
   if (!row) return null;
 
   const alreadyLinked = row.roster_person_id != null;
+  const hasMatches = sortedMatches.length > 0;
+  const requiresExplicitDecision = hasMatches && !alreadyLinked;
+  const canProceedFalsePositive = !requiresExplicitDecision || decision === 'false_positive';
+  const canProceedConfirmed =
+    !requiresExplicitDecision || (decision === 'confirmed_match' && selectedMatch != null);
+  const canAttachToRoster = !requiresExplicitDecision || canProceedFalsePositive || canProceedConfirmed;
 
   return (
     <View style={styles.screen}>
@@ -383,26 +446,103 @@ export default function RegistryResultScreen() {
         {sortedMatches.length > 0 ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Possible registry records</Text>
-            {sortedMatches.map((m, i) => (
-              <View
-                key={m.sourceId ?? `${m.name}-${m.dob ?? ''}-${m.zip ?? ''}-${i}`}
-                style={[styles.matchCard, ambientCard, styles.matchRow]}
-              >
-                <MatchMugshotOrDefault
-                  name={m.name}
-                  mugshotUrl={m.mugshotUrl}
-                  onOpenPreview={(url) => setFacePreviewUrl(url)}
-                />
-                <View style={styles.matchBody}>
-                  <Text style={styles.matchName}>{m.name}</Text>
-                  <Text style={styles.matchMeta}>{formatMatchMeta(m)}</Text>
+            {sortedMatches.map((m, i) => {
+              const key = matchKey(m, i);
+              const isSelected = selectedMatchKey === key;
+              return (
+                <View
+                  key={key}
+                  style={[
+                    styles.matchCard,
+                    ambientCard,
+                    styles.matchRow,
+                    isSelected && styles.matchCardSelected,
+                  ]}
+                >
+                  <MatchMugshotOrDefault
+                    name={m.name}
+                    mugshotUrl={m.mugshotUrl}
+                    onOpenPreview={(url) => setFacePreviewUrl(url)}
+                  />
+                  <View style={styles.matchBody}>
+                    <Text style={styles.matchName}>{m.name}</Text>
+                    <Text style={styles.matchMeta}>{formatMatchMeta(m)}</Text>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.selectBtn,
+                        isSelected && styles.selectBtnOn,
+                        pressed && styles.pressed,
+                      ]}
+                      onPress={() => {
+                        setDecision('confirmed_match');
+                        setSelectedMatchKey(key);
+                      }}
+                    >
+                      <Text style={[styles.selectBtnLabel, isSelected && styles.selectBtnLabelOn]}>
+                        {isSelected ? 'Selected as confirmed person' : 'Select this as confirmed person'}
+                      </Text>
+                    </Pressable>
+                  </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         ) : null}
 
         <Text style={styles.disclaimer}>{disclaimer}</Text>
+        {hasMatches ? (
+          <Text style={styles.disclaimer}>
+            Same or similar names are common. Confirm photo, age, and location before deciding.
+          </Text>
+        ) : null}
+        {requiresExplicitDecision ? (
+          <View style={styles.decisionWrap}>
+            <Text style={styles.sectionTitle}>Before you continue</Text>
+            <Pressable
+              onPress={() => {
+                setDecision('false_positive');
+                setSelectedMatchKey(null);
+              }}
+              style={({ pressed }) => [
+                styles.decisionBtn,
+                decision === 'false_positive' && styles.decisionBtnOn,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.decisionTitle,
+                  decision === 'false_positive' && styles.decisionTitleOn,
+                ]}
+              >
+                Not him (false positive)
+              </Text>
+              <Text style={styles.decisionBody}>
+                Continue to roster without attaching a confirmed registry person.
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setDecision('confirmed_match')}
+              style={({ pressed }) => [
+                styles.decisionBtn,
+                decision === 'confirmed_match' && styles.decisionBtnOn,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.decisionTitle,
+                  decision === 'confirmed_match' && styles.decisionTitleOn,
+                ]}
+              >
+                Confirmed hit (this is him)
+              </Text>
+              <Text style={styles.decisionBody}>
+                Select one record above, then either cancel date or continue to roster.
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {loadError ? <Text style={styles.inlineError}>{loadError}</Text> : null}
 
@@ -416,30 +556,82 @@ export default function RegistryResultScreen() {
           </Pressable>
         ) : (
           <View style={styles.actions}>
-            <Pressable
-              accessibilityRole="button"
-              disabled={saving}
-              onPress={() => void saveNew()}
-              style={({ pressed }) => [
-                styles.primaryBtn,
-                pressed && styles.pressed,
-                saving && styles.disabled,
-              ]}
-            >
-              {saving ? (
-                <ActivityIndicator color={colors.onPrimary} />
-              ) : (
-                <Text style={styles.primaryLabel}>Save to roster</Text>
-              )}
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              disabled={saving}
-              onPress={() => void openMerge()}
-              style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
-            >
-              <Text style={styles.secondaryLabel}>Merge into existing person</Text>
-            </Pressable>
+            {requestedRosterPersonId ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={saving || !canAttachToRoster}
+                onPress={() => void linkToRequestedRoster()}
+                style={({ pressed }) => [
+                  styles.primaryBtn,
+                  pressed && styles.pressed,
+                  (saving || !canAttachToRoster) && styles.disabled,
+                ]}
+              >
+                {saving ? (
+                  <ActivityIndicator color={colors.onPrimary} />
+                ) : (
+                  <Text style={styles.primaryLabel}>
+                    {decision === 'confirmed_match'
+                      ? 'Add to roster anyway (attach selected record)'
+                      : 'Link to this roster person'}
+                  </Text>
+                )}
+              </Pressable>
+            ) : (
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={saving || !canAttachToRoster}
+                  onPress={() => void saveNew()}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    pressed && styles.pressed,
+                    (saving || !canAttachToRoster) && styles.disabled,
+                  ]}
+                >
+                  {saving ? (
+                    <ActivityIndicator color={colors.onPrimary} />
+                  ) : (
+                    <Text style={styles.primaryLabel}>
+                      {decision === 'confirmed_match'
+                        ? 'Add to roster anyway (attach selected record)'
+                        : 'Save person to roster'}
+                    </Text>
+                  )}
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={saving || !canAttachToRoster}
+                  onPress={() => void openMerge()}
+                  style={({ pressed }) => [
+                    styles.secondaryBtn,
+                    pressed && styles.pressed,
+                    !canAttachToRoster && styles.disabled,
+                  ]}
+                >
+                  <Text style={styles.secondaryLabel}>Merge into existing person</Text>
+                </Pressable>
+              </>
+            )}
+            {hasMatches ? (
+              <>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={saving || !canProceedConfirmed}
+                  onPress={onCancelDate}
+                  style={({ pressed }) => [
+                    styles.cancelDateBtn,
+                    pressed && styles.pressed,
+                    (saving || !canProceedConfirmed) && styles.disabled,
+                  ]}
+                >
+                  <Text style={styles.cancelDateLabel}>Cancel date (do not add to roster)</Text>
+                </Pressable>
+                <Text style={styles.actionHint}>
+                  Skip for now: use Back. This keeps the check without adding anyone to roster.
+                </Text>
+              </>
+            ) : null}
           </View>
         )}
       </ScrollView>
@@ -575,6 +767,10 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     marginBottom: spacing.sm,
   },
+  matchCardSelected: {
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
   matchRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -626,6 +822,27 @@ const styles = StyleSheet.create({
     color: colors.onSurfaceVariant,
     marginTop: 4,
   },
+  selectBtn: {
+    marginTop: spacing.xs,
+    borderRadius: radii.full,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  selectBtnOn: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryFixed,
+  },
+  selectBtnLabel: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelSm,
+    color: colors.onSurfaceVariant,
+  },
+  selectBtnLabelOn: {
+    color: colors.primary,
+  },
   disclaimer: {
     fontFamily: fontFamily.regular,
     fontSize: typeScale.labelMd,
@@ -635,6 +852,36 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: spacing.md,
+  },
+  decisionWrap: {
+    marginBottom: spacing.lg,
+    gap: spacing.sm,
+  },
+  decisionBtn: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surfaceContainerLowest,
+    padding: spacing.md,
+    gap: 6,
+  },
+  decisionBtnOn: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryFixed,
+  },
+  decisionTitle: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    color: colors.onSurface,
+  },
+  decisionTitleOn: {
+    color: colors.primary,
+  },
+  decisionBody: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelMd,
+    lineHeight: lineHeight(typeScale.labelMd, 1.4),
+    color: colors.onSurfaceVariant,
   },
   primaryBtn: {
     backgroundColor: colors.primary,
@@ -660,6 +907,24 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.bodyMd,
     color: colors.primary,
+  },
+  cancelDateBtn: {
+    borderRadius: radii.lg,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.errorContainer,
+    backgroundColor: colors.errorContainer,
+  },
+  cancelDateLabel: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    color: colors.error,
+  },
+  actionHint: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelSm,
+    color: colors.tertiary,
   },
   disabled: { opacity: 0.6 },
   errorText: {

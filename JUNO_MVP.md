@@ -303,13 +303,20 @@ Tea / Inbox
 3. App calls `/lookup-registry` Edge Function
 4. Backend queries registry API and normalizes results
 5. App displays: clear / possible match / match, name, DOB, state, zip, mugshot if available
-6. User taps "Save to Roster"
-7. `roster_people` + `registry_checks` rows created
+6. If no records appear (`clear`), user can save person to Roster immediately
+7. If records appear (`possible_match` / `match`), user must choose:
+   - **Not him (false positive):** continue to roster without attaching a confirmed registry person
+   - **Confirmed hit:** select one specific record, then choose either:
+     - **Cancel date:** do not create/link a roster person, keep check in private history
+     - **Add/link anyway:** create/link roster person and attach selected record details
+   - **Skip for now:** leave check unlinked in private history
+8. `registry_checks` row is created at lookup time; `roster_people` and selected `matched_*` fields are only written after explicit user action
 
 **Implementation notes:**
 - Always show "possible match" language unless the API gives a highly certain identity match
 - Add disclaimer: *"Results may include people with the same or similar name."*
 - Avoid definitive identity claims unless legally safe
+- Never auto-select the first returned registry record as the matched person
 
 ### Flow B — Reverse Image Search
 1. User opens **Protect** → selects "Image Search"
@@ -328,10 +335,11 @@ Tea / Inbox
 - Add report/delete controls
 
 ### Flow C — Add Person to Roster
-1. Lookup result completed → user taps "Save to Roster"
-2. If person already exists, suggest merge
-3. User confirms → person profile created or updated
-4. Lookup artifacts attached
+1. Lookup result completed → app asks for explicit resolution when records are present
+2. User chooses false positive vs confirmed hit and, for confirmed hits, selects one specific result
+3. User then picks destination: create new roster person, merge/link into existing person, or cancel/skip
+4. If destination is roster, person profile is created/updated and lookup artifacts are attached
+5. If user cancels/skips, check remains in private history without roster linkage
 
 **Roster person profile includes:** name, age/DOB, state/zip, registry status, public links, AI summary, chat screenshot summaries, user notes.
 

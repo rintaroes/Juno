@@ -278,12 +278,12 @@ Deno.serve(async (req: Request) => {
     return jsonResponse(400, { error: 'name is required' });
   }
 
-  let rosterPersonId: string | null = body.rosterPersonId?.trim() || null;
-  if (rosterPersonId) {
+  const requestedRosterPersonId = body.rosterPersonId?.trim() || null;
+  if (requestedRosterPersonId) {
     const { data: row, error: rpErr } = await adminClient
       .from('roster_people')
       .select('id')
-      .eq('id', rosterPersonId)
+      .eq('id', requestedRosterPersonId)
       .eq('owner_id', user.id)
       .maybeSingle();
     if (rpErr || !row) {
@@ -317,28 +317,33 @@ Deno.serve(async (req: Request) => {
     normalized = { status: 'error', matches: [], disclaimer: DISCLAIMER };
   }
 
-  const primary = normalized.matches[0];
-  const matchedDob = primary?.dob ? primary.dob.slice(0, 10) : null;
-
   const { data: inserted, error: insErr } = await adminClient
     .from('registry_checks')
     .insert({
       owner_id: user.id,
-      roster_person_id: rosterPersonId,
+      roster_person_id: null,
       query_name: name,
       query_age: queryAge,
       query_state: state,
       query_zip: zip,
       status: normalized.status,
       raw_result: {
-        input: { name, age: queryAge, dob: dobTrim, city, state, zip },
+        input: {
+          name,
+          age: queryAge,
+          dob: dobTrim,
+          city,
+          state,
+          zip,
+          requestedRosterPersonId,
+        },
         vendor: normalized,
       },
-      matched_name: primary?.name ?? null,
-      matched_dob: matchedDob,
-      matched_state: primary?.state ?? null,
-      matched_zip: primary?.zip ?? null,
-      mugshot_url: primary?.mugshotUrl ?? null,
+      matched_name: null,
+      matched_dob: null,
+      matched_state: null,
+      matched_zip: null,
+      mugshot_url: null,
     })
     .select('id')
     .single();

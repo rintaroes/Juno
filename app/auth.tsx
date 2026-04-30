@@ -42,7 +42,7 @@ export default function AuthScreen() {
   );
 
   if (loading) return <AppLoading label="Checking session..." />;
-  if (session) return <Redirect href="/" />;
+  if (session) return <Redirect href="/map" />;
   if (error) return <AppErrorState message={error} onRetry={() => setError(null)} />;
 
   const onSubmit = async () => {

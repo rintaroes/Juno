@@ -22,12 +22,12 @@ export type DockTabId = 'protect' | 'roster' | 'map' | 'circles';
 const TABS: {
   id: DockTabId;
   label: string;
-  href: '/' | '/roster' | '/map' | '/circles';
+  href: '/map' | '/protect' | '/roster' | '/circles';
   icon: typeof Shield;
 }[] = [
-  { id: 'protect', label: 'Protect', href: '/', icon: Shield },
-  { id: 'roster', label: 'Roster', href: '/roster', icon: BookUser },
   { id: 'map', label: 'Map', href: '/map', icon: MapPinned },
+  { id: 'protect', label: 'Protect', href: '/protect', icon: Shield },
+  { id: 'roster', label: 'Roster', href: '/roster', icon: BookUser },
   { id: 'circles', label: 'Circles', href: '/circles', icon: UsersRound },
 ];
 
@@ -46,6 +46,8 @@ export function AppDock({
       ? 'map'
       : pathname.includes('/circles')
         ? 'circles'
+        : pathname.includes('/protect') || pathname.startsWith('/registry')
+          ? 'protect'
       : 'protect';
   const bottom = Math.max(insets.bottom, 8);
 
