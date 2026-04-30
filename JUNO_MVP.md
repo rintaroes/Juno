@@ -22,9 +22,8 @@ Juno MVP has four core modules:
 - Friends can tap the user on the map and see who they are with
 
 **Tea Package / AI Summaries**
-- Share digestible summary of a roster person with selected friends
-- Optional chat screenshot upload
-- AI extracts/summarizes dating-app or iMessage conversation context
+- **Deferred from MVP scope for now.** Tea package sharing and friend messaging remain future work.
+- Optional chat screenshot upload and AI summaries remain in scope via Roster profile analysis.
 
 ---
 
@@ -265,8 +264,7 @@ Protect / Lookup
   │   ├── Sex Offender Lookup
   │   ├── Reverse Image Search
   │   └── Result Report
-  │       ├── Save to Roster
-  │       └── Share Tea Package
+  │       └── Save to Roster
 
 Roster
   ├── Roster List
@@ -274,8 +272,7 @@ Roster
       ├── Registry Results
       ├── Image Search Results
       ├── Chat Screenshot Summaries
-      ├── Notes
-      └── Share Tea Package
+      └── Notes
 
 Map
   ├── Live Circle Map
@@ -292,12 +289,9 @@ Circles
   └── Location Sharing Settings
 
 Tea / Inbox
-  ├── Received Tea Packages
-  ├── Tea Detail
-  └── Chat / Comments (later)
+  └── Deferred (out of current MVP scope)
 ```
-
-> The current dock has Protect · Map · Circles · Chat. Rename or evolve **Chat → Tea / Inbox**, since the MVP's social sharing feature is more important than general chat.
+> Current dock behavior is **Protect · Roster · Map · Circles**. For MVP, Circles opens settings directly; messaging/tea inbox paths are hidden.
 
 ---
 
@@ -339,7 +333,7 @@ Tea / Inbox
 3. User confirms → person profile created or updated
 4. Lookup artifacts attached
 
-**Roster person profile includes:** name, age/DOB, state/zip, registry status, public links, AI summary, chat screenshot summaries, user notes, tea package history.
+**Roster person profile includes:** name, age/DOB, state/zip, registry status, public links, AI summary, chat screenshot summaries, user notes.
 
 ### Flow D — Upload Chat Screenshot
 1. User opens **Roster** → opens person profile → taps "Add Chat Screenshot"
@@ -349,6 +343,8 @@ Tea / Inbox
 5. Summary saved to person profile
 
 ### Flow E — Share Tea Package
+**Status: deferred from MVP scope.**
+
 1. User opens person profile → taps "Share Tea Package"
 2. Selects friends, chooses included info (registry result, public profile summary, chat summary, personal note)
 3. Backend creates `tea_package`
@@ -560,6 +556,8 @@ Tea / Inbox
 ### Phase 5 — Tea Package Sharing
 **Goal:** Make Juno social.
 
+**Status: deferred from MVP scope.** Keep schema/code paths available for future re-enable; do not require launch readiness for MVP acceptance.
+
 - Create `tea_packages` and `tea_package_recipients`
 - Build share package composer
 - Select friends, choose included info
@@ -617,11 +615,11 @@ Tea / Inbox
 | 3 | Registry lookup |
 | 4 | Reverse image search — **deferred** (see Phase 3 status) |
 | 5 | Chat screenshot summary |
-| 6 | Tea package sharing |
-| 7 | Friend circles |
-| 8 | Date mode map |
+| 6 | Friend circles (settings-only in MVP; messaging deferred) |
+| 7 | Date mode map |
+| 8 | Tea package sharing (deferred) |
 
-> **Reason:** Roster is the core data object. Registry lookup, image search, chat screenshots, tea packages, and date mode all depend on having a saved person profile.
+> **Reason:** Roster is the core data object. Registry lookup, image search, chat screenshots, and date mode all depend on having a saved person profile. Tea sharing can layer on later.
 
 ---
 
@@ -662,6 +660,6 @@ The MVP is complete when a user can:
 - [ ] ~~Look up a potential date by image search~~ — *Phase 3 deferred: no reliable provider for photo → socials today.*
 - [ ] Save that person to roster
 - [ ] Upload a chat screenshot and get an AI summary
-- [ ] Share a tea package with a friend
+- [ ] ~~Share a tea package with a friend~~ — *Deferred from current MVP scope.*
 - [ ] Start date mode with a roster person
 - [ ] Have friends see their on-date status on the map
