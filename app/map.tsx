@@ -1458,7 +1458,7 @@ export default function MapScreen() {
                         ? 'Has not shared location yet'
                         : person.status === 'on_date'
                           ? `With ${person.companion_display_name ?? 'someone'} · ${formatUpdated(person.updated_at)}`
-                          : `Last update ${formatUpdated(person.updated_at)}`;
+                          : `Last updated ${formatUpdated(person.updated_at)}`;
                       return (
                         <Pressable
                           key={person.profile_id}
@@ -1634,7 +1634,7 @@ export default function MapScreen() {
                               strokeWidth={2}
                             />
                             <Text style={styles.sheetLastUpdatedInline}>
-                              Last update {formatUpdated(detailFriend.updated_at)}
+                              Last updated {formatUpdated(detailFriend.updated_at)}
                             </Text>
                           </View>
                           {detailFriend.companion_ai_summary ? (
