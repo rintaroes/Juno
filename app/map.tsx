@@ -18,7 +18,10 @@ import {
   ActivityIndicator,
   Animated,
   Alert,
+  FlatList,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   PanResponder,
   Platform,
   Pressable,
@@ -107,12 +110,16 @@ function regionForFriendFocus(latitude: number, longitude: number): Region {
   };
 }
 
-const TIMER_OPTIONS: { label: string; minutes: number | null }[] = [
-  { label: 'None', minutes: null },
-  { label: '60 min', minutes: 60 },
-  { label: '2 hr', minutes: 120 },
-  { label: '3 hr', minutes: 180 },
+const DATE_DURATION_OPTIONS: { id: string; label: string; subtitle: string; minutes: number }[] = [
+  { id: '1h', label: '1 hour', subtitle: 'Quick coffee, quick vibe check.', minutes: 60 },
+  { id: '2h', label: '2 hours', subtitle: 'Dinner and a good convo.', minutes: 120 },
+  { id: '4h', label: '4 hours', subtitle: 'A full evening out.', minutes: 240 },
+  { id: '12h', label: 'Whole night', subtitle: 'If sparks fly, call it 12 hours.', minutes: 720 },
 ];
+const CUSTOM_HOUR_MAX = 23;
+const CUSTOM_MINUTE_MAX = 59;
+const WHEEL_ROW_HEIGHT = 44;
+const WHEEL_VISIBLE_ROWS = 5;
 
 function displayName(s: FriendMapSnapshot) {
   return s.first_name?.trim() || (s.username ? `@${s.username}` : 'Friend');
@@ -157,8 +164,14 @@ function timerLine(
   const end = new Date(startedAt).getTime() + timerMinutes * 60_000;
   const ms = end - nowMs;
   if (ms <= 0) return 'Timer ended';
-  const m = Math.ceil(ms / 60_000);
-  return `${m} min remaining`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} remaining`;
+  }
+  return `${minutes}:${String(seconds).padStart(2, '0')} remaining`;
 }
 
 type PinModel = {
@@ -249,6 +262,8 @@ export default function MapScreen() {
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const lastServerPush = useRef(0);
   const myCoordsRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const hoursListRef = useRef<FlatList<number> | null>(null);
+  const minutesListRef = useRef<FlatList<number> | null>(null);
 
   const [friends, setFriends] = useState<FriendMapSnapshot[]>([]);
   const [myCoords, setMyCoords] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -259,8 +274,13 @@ export default function MapScreen() {
   const [dateModalOpen, setDateModalOpen] = useState(false);
   const [roster, setRoster] = useState<RosterPerson[]>([]);
   const [rosterLoading, setRosterLoading] = useState(false);
+  const [dateSetupStep, setDateSetupStep] = useState<1 | 2 | 3>(1);
+  const [durationChoiceId, setDurationChoiceId] = useState<string | null>(null);
+  const [customPickerOpen, setCustomPickerOpen] = useState(false);
+  const [customHours, setCustomHours] = useState(2);
+  const [customMinutes, setCustomMinutes] = useState(0);
   const [selectedRosterId, setSelectedRosterId] = useState<string | null>(null);
-  const [timerChoice, setTimerChoice] = useState<number | null>(null);
+  const [timerChoice, setTimerChoice] = useState<number>(120);
   const [myLive, setMyLive] = useState<LiveLocationRow | null>(null);
   const [mySession, setMySession] = useState<DateSessionRow | null>(null);
   const [dateActionLoading, setDateActionLoading] = useState(false);
@@ -348,9 +368,24 @@ export default function MapScreen() {
   }, [myCoords]);
 
   useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 30_000);
+    const id = setInterval(() => setTick((n) => n + 1), 1_000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (!customPickerOpen) return;
+    const t = setTimeout(() => {
+      hoursListRef.current?.scrollToOffset({
+        offset: customHours * WHEEL_ROW_HEIGHT,
+        animated: false,
+      });
+      minutesListRef.current?.scrollToOffset({
+        offset: customMinutes * WHEEL_ROW_HEIGHT,
+        animated: false,
+      });
+    }, 0);
+    return () => clearTimeout(t);
+  }, [customHours, customMinutes, customPickerOpen]);
 
   /** Start/stop OS background updates when preference + permissions allow (e.g. after app restart). */
   useEffect(() => {
@@ -665,9 +700,40 @@ export default function MapScreen() {
     const pid = selectedId.slice('friend:'.length);
     return friends.find((f) => f.profile_id === pid) ?? null;
   }, [friends, selectedId]);
+  const hourValues = useMemo(() => Array.from({ length: CUSTOM_HOUR_MAX + 1 }, (_, i) => i), []);
+  const minuteValues = useMemo(
+    () => Array.from({ length: CUSTOM_MINUTE_MAX + 1 }, (_, i) => i),
+    [],
+  );
+  const selectedCompanion = useMemo(
+    () => roster.find((item) => item.id === selectedRosterId) ?? null,
+    [roster, selectedRosterId],
+  );
+  const selectedDurationLabel = useMemo(() => {
+    const h = Math.floor(timerChoice / 60);
+    const m = timerChoice % 60;
+    if (h > 0 && m > 0) return `${h}h ${m}m`;
+    if (h > 0) return `${h}h`;
+    return `${m}m`;
+  }, [timerChoice]);
+  const customDurationLabel = useMemo(() => {
+    const h = customHours;
+    const m = customMinutes;
+    if (h > 0 && m > 0) return `${h}h ${m}m`;
+    if (h > 0) return `${h}h`;
+    return `${m}m`;
+  }, [customHours, customMinutes]);
 
   const openDateModal = useCallback(() => {
     setDateModalOpen(true);
+    if (!durationChoiceId && timerChoice > 0) {
+      const preset = DATE_DURATION_OPTIONS.find((opt) => opt.minutes === timerChoice);
+      if (preset) setDurationChoiceId(preset.id);
+      else setDurationChoiceId('custom');
+    }
+    if (!selectedRosterId) {
+      setDateSetupStep(1);
+    }
     if (!user?.id) return;
     setRosterLoading(true);
     void listRosterPeople(user.id, false)
@@ -675,7 +741,57 @@ export default function MapScreen() {
       .catch(() => setRoster([]))
       .finally(() => setRosterLoading(false));
     void refreshMyDateState();
-  }, [user?.id, refreshMyDateState]);
+  }, [durationChoiceId, refreshMyDateState, selectedRosterId, timerChoice, user?.id]);
+
+  const toStep = useCallback((target: 1 | 2 | 3) => {
+    setDateSetupStep(target);
+  }, []);
+
+  const applyPresetDuration = useCallback((id: string, minutes: number) => {
+    setDurationChoiceId(id);
+    setTimerChoice(minutes);
+  }, []);
+
+  const openCustomPicker = useCallback(() => {
+    const existing = Math.max(1, Math.min(1440, timerChoice));
+    setCustomHours(Math.floor(existing / 60));
+    setCustomMinutes(existing % 60);
+    setCustomPickerOpen(true);
+  }, [timerChoice]);
+
+  const confirmCustomDuration = useCallback(() => {
+    const safeH = Math.max(0, Math.min(CUSTOM_HOUR_MAX, customHours));
+    const safeM = Math.max(0, Math.min(CUSTOM_MINUTE_MAX, customMinutes));
+    const next = Math.max(1, Math.min(1440, safeH * 60 + safeM));
+    setCustomHours(Math.floor(next / 60));
+    setCustomMinutes(next % 60);
+    setTimerChoice(next);
+    setDurationChoiceId('custom');
+    setCustomPickerOpen(false);
+  }, [customHours, customMinutes]);
+
+  const onCloseDateModal = useCallback(() => {
+    setDateModalOpen(false);
+    setCustomPickerOpen(false);
+  }, []);
+
+  const onWheelEnd = useCallback(
+    (
+      e: NativeSyntheticEvent<NativeScrollEvent>,
+      max: number,
+      setter: (value: number) => void,
+      ref: { current: FlatList<number> | null },
+    ) => {
+      const y = e.nativeEvent.contentOffset.y;
+      const idx = Math.max(0, Math.min(max, Math.round(y / WHEEL_ROW_HEIGHT)));
+      setter(idx);
+      ref.current?.scrollToOffset({
+        offset: idx * WHEEL_ROW_HEIGHT,
+        animated: true,
+      });
+    },
+    [],
+  );
 
   const onStartDate = useCallback(async () => {
     if (!user?.id || !selectedRosterId) {
@@ -703,6 +819,8 @@ export default function MapScreen() {
       await refreshFriends();
       setDateModalOpen(false);
       setSelectedRosterId(null);
+      setDateSetupStep(1);
+      setDurationChoiceId(null);
     } catch (e) {
       Alert.alert('Could not start', e instanceof Error ? e.message : 'Try again.');
     } finally {
@@ -798,6 +916,7 @@ export default function MapScreen() {
 
   const detailFriend = selectedFriend;
   const detailSelf = selectedId?.startsWith('me:');
+  const activeDateCountdown = timerLine(mySession?.started_at ?? null, mySession?.timer_minutes ?? null, Date.now());
 
   return (
     <View style={styles.screen}>
@@ -854,6 +973,7 @@ export default function MapScreen() {
           onPress={openDateModal}
           style={({ pressed }) => [
             styles.dateFab,
+            mySession?.status === 'active' && styles.dateFabActive,
             {
               top: insets.top + (locPerm === 'denied' || mapLoadError ? 72 : spacing.sm),
               right: containerMargin,
@@ -861,8 +981,19 @@ export default function MapScreen() {
             pressed && styles.pressed,
           ]}
         >
-          <Heart color={colors.onSecondaryContainer} size={20} strokeWidth={2} />
-          <Text style={styles.dateFabLabel}>Date mode</Text>
+          <Heart
+            color={mySession?.status === 'active' ? colors.onErrorContainer : colors.onSecondaryContainer}
+            size={20}
+            strokeWidth={2}
+          />
+          <View>
+            <Text style={[styles.dateFabLabel, mySession?.status === 'active' && styles.dateFabLabelActive]}>
+              {mySession?.status === 'active' ? 'On date' : 'Date mode'}
+            </Text>
+            {mySession?.status === 'active' && activeDateCountdown ? (
+              <Text style={styles.dateFabTimer}>{activeDateCountdown.replace(' remaining', '')}</Text>
+            ) : null}
+          </View>
         </Pressable>
 
         <Animated.View
@@ -1042,11 +1173,32 @@ export default function MapScreen() {
         </Pressable>
       </Modal>
 
-      <Modal visible={dateModalOpen} animationType="slide" onRequestClose={() => setDateModalOpen(false)}>
+      <Modal visible={dateModalOpen} animationType="slide" onRequestClose={onCloseDateModal}>
         <View style={[styles.dateModalScreen, { paddingTop: insets.top + spacing.md }]}>
           <View style={styles.dateModalHeader}>
-            <Text style={styles.dateModalTitle}>Date mode</Text>
-            <Pressable onPress={() => setDateModalOpen(false)} style={({ pressed }) => [pressed && styles.pressed]}>
+            {mySession?.status === 'active' ? null : (
+              <Pressable
+                disabled={dateSetupStep === 1}
+                onPress={() => toStep((Math.max(1, dateSetupStep - 1) as 1 | 2 | 3))}
+                style={({ pressed }) => [
+                  styles.backPill,
+                  dateSetupStep === 1 && styles.backPillDisabled,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.backPillLabel}>Back</Text>
+              </Pressable>
+            )}
+            <Text style={styles.dateModalTitle}>
+              {mySession?.status === 'active'
+                ? 'Date mode'
+                : dateSetupStep === 1
+                  ? 'Plan your date'
+                  : dateSetupStep === 2
+                    ? 'Choose companion'
+                    : 'Ready to start'}
+            </Text>
+            <Pressable onPress={onCloseDateModal} style={({ pressed }) => [pressed && styles.pressed]}>
               <X color={colors.onSurface} size={26} strokeWidth={2} />
             </Pressable>
           </View>
@@ -1125,62 +1277,218 @@ export default function MapScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.sectionLabel}>Who are you meeting?</Text>
-                {rosterLoading ? (
-                  <ActivityIndicator style={{ marginVertical: 24 }} />
-                ) : roster.length === 0 ? (
-                  <Text style={styles.emptyText}>
-                    Add someone to your roster first, then you can start date mode.
-                  </Text>
-                ) : (
-                  roster.map((item) => {
-                    const sel = selectedRosterId === item.id;
-                    return (
+                {dateSetupStep === 1 ? (
+                  <>
+                    <Text style={styles.stepLead}>
+                      Great, you are going on a date. How long do you plan to spend with your new
+                      flame?
+                    </Text>
+                    <View style={styles.durationList}>
+                      {DATE_DURATION_OPTIONS.map((opt) => {
+                        const on = durationChoiceId === opt.id;
+                        return (
+                          <Pressable
+                            key={opt.id}
+                            onPress={() => applyPresetDuration(opt.id, opt.minutes)}
+                            style={[styles.durationCard, on && styles.durationCardOn]}
+                          >
+                            <Text style={styles.durationLabel}>{opt.label}</Text>
+                            <Text style={styles.durationSub}>{opt.subtitle}</Text>
+                          </Pressable>
+                        );
+                      })}
                       <Pressable
-                        key={item.id}
-                        onPress={() => setSelectedRosterId(item.id)}
-                        style={[styles.rosterPick, sel && styles.rosterPickOn]}
+                        onPress={openCustomPicker}
+                        style={[
+                          styles.durationCard,
+                          durationChoiceId === 'custom' && styles.durationCardOn,
+                        ]}
                       >
-                        <Text style={styles.rosterPickName}>{item.display_name}</Text>
-                      </Pressable>
-                    );
-                  })
-                )}
-                <Text style={[styles.sectionLabel, { marginTop: spacing.lg }]}>Check-in timer</Text>
-                <View style={styles.timerRow}>
-                  {TIMER_OPTIONS.map((opt) => {
-                    const on = timerChoice === opt.minutes;
-                    return (
-                      <Pressable
-                        key={opt.label}
-                        onPress={() => setTimerChoice(opt.minutes)}
-                        style={[styles.timerChip, on && styles.timerChipOn]}
-                      >
-                        <Text style={[styles.timerChipText, on && styles.timerChipTextOn]}>
-                          {opt.label}
+                        <Text style={styles.durationLabel}>Custom</Text>
+                        <Text style={styles.durationSub}>
+                          {durationChoiceId === 'custom'
+                            ? `Selected: ${selectedDurationLabel}`
+                            : 'Spin hours and minutes like the clock app.'}
                         </Text>
                       </Pressable>
-                    );
-                  })}
-                </View>
-                <Pressable
-                  onPress={onStartDate}
-                  disabled={dateActionLoading || !selectedRosterId}
-                  style={({ pressed }) => [
-                    styles.startBtn,
-                    pressed && styles.pressed,
-                    (!selectedRosterId || dateActionLoading) && styles.disabledBtn,
-                  ]}
-                >
-                  {dateActionLoading ? (
-                    <ActivityIndicator color={colors.onPrimary} />
-                  ) : (
-                    <Text style={styles.startBtnText}>Start date</Text>
-                  )}
-                </Pressable>
+                    </View>
+                    <Pressable
+                      onPress={() => toStep(2)}
+                      disabled={!durationChoiceId}
+                      style={({ pressed }) => [
+                        styles.startBtn,
+                        pressed && styles.pressed,
+                        !durationChoiceId && styles.disabledBtn,
+                      ]}
+                    >
+                      <Text style={styles.startBtnText}>Next</Text>
+                    </Pressable>
+                  </>
+                ) : null}
+
+                {dateSetupStep === 2 ? (
+                  <>
+                    <Text style={styles.sectionLabel}>Who are you meeting?</Text>
+                    {rosterLoading ? (
+                      <ActivityIndicator style={{ marginVertical: 24 }} />
+                    ) : roster.length === 0 ? (
+                      <Text style={styles.emptyText}>
+                        Add someone to your roster first, then you can start date mode.
+                      </Text>
+                    ) : (
+                      <>
+                        {roster.map((item) => {
+                          const sel = selectedRosterId === item.id;
+                          return (
+                            <Pressable
+                              key={item.id}
+                              onPress={() => setSelectedRosterId(item.id)}
+                              style={[styles.rosterPick, sel && styles.rosterPickOn]}
+                            >
+                              <Text style={styles.rosterPickName}>{item.display_name}</Text>
+                            </Pressable>
+                          );
+                        })}
+                        <Pressable
+                          onPress={() => toStep(3)}
+                          disabled={!selectedRosterId}
+                          style={({ pressed }) => [
+                            styles.startBtn,
+                            pressed && styles.pressed,
+                            !selectedRosterId && styles.disabledBtn,
+                          ]}
+                        >
+                          <Text style={styles.startBtnText}>Next</Text>
+                        </Pressable>
+                      </>
+                    )}
+                  </>
+                ) : null}
+
+                {dateSetupStep === 3 ? (
+                  <>
+                    <Text style={styles.stepLead}>All set. One tap and your circle can follow up.</Text>
+                    <View style={styles.reviewCard}>
+                      <Text style={styles.reviewRow}>
+                        Duration: <Text style={styles.reviewStrong}>{selectedDurationLabel}</Text>
+                      </Text>
+                      <Text style={styles.reviewRow}>
+                        With:{' '}
+                        <Text style={styles.reviewStrong}>
+                          {selectedCompanion?.display_name ?? 'No one selected'}
+                        </Text>
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={onStartDate}
+                      disabled={dateActionLoading || !selectedRosterId}
+                      style={({ pressed }) => [
+                        styles.startBtn,
+                        styles.finalStartBtn,
+                        pressed && styles.pressed,
+                        (!selectedRosterId || dateActionLoading) && styles.disabledBtn,
+                      ]}
+                    >
+                      {dateActionLoading ? (
+                        <ActivityIndicator color={colors.onPrimary} />
+                      ) : (
+                        <Text style={styles.startBtnText}>Start date</Text>
+                      )}
+                    </Pressable>
+                  </>
+                ) : null}
               </>
             )}
           </ScrollView>
+          {customPickerOpen ? (
+            <View style={styles.customLayer} pointerEvents="box-none">
+              <Pressable style={styles.customBackdrop} onPress={() => setCustomPickerOpen(false)} />
+              <View style={styles.customSheet}>
+                <Text style={styles.customTitle}>Custom duration</Text>
+                <Text style={styles.customSub}>Spin hours and minutes, center row is selected.</Text>
+                <View style={styles.wheelsWrap}>
+                  <View style={styles.wheelColumn}>
+                    <Text style={styles.wheelLabel}>Hours</Text>
+                    <View style={styles.wheelViewport}>
+                      <FlatList
+                        ref={hoursListRef}
+                        data={hourValues}
+                        style={styles.wheelList}
+                        keyExtractor={(h) => `h-${h}`}
+                        renderItem={({ item }) => (
+                          <View style={styles.wheelRow}>
+                            <Text
+                              style={[styles.wheelRowText, customHours === item && styles.wheelRowTextOn]}
+                            >
+                              {item}
+                            </Text>
+                          </View>
+                        )}
+                        snapToInterval={WHEEL_ROW_HEIGHT}
+                        decelerationRate="fast"
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={styles.wheelPad}
+                        getItemLayout={(_, index) => ({
+                          length: WHEEL_ROW_HEIGHT,
+                          offset: WHEEL_ROW_HEIGHT * index,
+                          index,
+                        })}
+                        onMomentumScrollEnd={(e) =>
+                          onWheelEnd(e, CUSTOM_HOUR_MAX, setCustomHours, hoursListRef)
+                        }
+                      />
+                      <View style={styles.wheelSelectionBand} pointerEvents="none" />
+                    </View>
+                  </View>
+                  <View style={styles.wheelColumn}>
+                    <Text style={styles.wheelLabel}>Minutes</Text>
+                    <View style={styles.wheelViewport}>
+                      <FlatList
+                        ref={minutesListRef}
+                        data={minuteValues}
+                        style={styles.wheelList}
+                        keyExtractor={(m) => `m-${m}`}
+                        renderItem={({ item }) => (
+                          <View style={styles.wheelRow}>
+                            <Text
+                              style={[
+                                styles.wheelRowText,
+                                customMinutes === item && styles.wheelRowTextOn,
+                              ]}
+                            >
+                              {String(item).padStart(2, '0')}
+                            </Text>
+                          </View>
+                        )}
+                        snapToInterval={WHEEL_ROW_HEIGHT}
+                        decelerationRate="fast"
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={styles.wheelPad}
+                        getItemLayout={(_, index) => ({
+                          length: WHEEL_ROW_HEIGHT,
+                          offset: WHEEL_ROW_HEIGHT * index,
+                          index,
+                        })}
+                        onMomentumScrollEnd={(e) =>
+                          onWheelEnd(e, CUSTOM_MINUTE_MAX, setCustomMinutes, minutesListRef)
+                        }
+                      />
+                      <View style={styles.wheelSelectionBand} pointerEvents="none" />
+                    </View>
+                  </View>
+                </View>
+                <Text style={styles.customPreview}>Selected: {customDurationLabel}</Text>
+                <View style={styles.customActions}>
+                  <Pressable onPress={() => setCustomPickerOpen(false)} style={styles.customCancelBtn}>
+                    <Text style={styles.customCancelLabel}>Cancel</Text>
+                  </Pressable>
+                  <Pressable onPress={confirmCustomDuration} style={styles.customUseBtn}>
+                    <Text style={styles.customUseLabel}>Use time</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          ) : null}
         </View>
       </Modal>
 
@@ -1236,10 +1544,23 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
+  dateFabActive: {
+    backgroundColor: colors.errorContainer,
+    borderColor: colors.error,
+  },
   dateFabLabel: {
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.labelSm,
     color: colors.onSecondaryContainer,
+  },
+  dateFabLabelActive: {
+    color: colors.onErrorContainer,
+  },
+  dateFabTimer: {
+    fontFamily: fontFamily.bold,
+    fontSize: typeScale.labelSm,
+    color: colors.onErrorContainer,
+    marginTop: 1,
   },
   sheet: {
     position: 'absolute',
@@ -1515,11 +1836,61 @@ const styles = StyleSheet.create({
   dateModalScroll: {
     paddingBottom: spacing.xl * 2,
   },
+  backPill: {
+    minWidth: 56,
+    borderRadius: radii.full,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surfaceContainerLowest,
+  },
+  backPillDisabled: {
+    opacity: 0.35,
+  },
+  backPillLabel: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelSm,
+    color: colors.onSurfaceVariant,
+    textAlign: 'center',
+  },
   sectionLabel: {
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.labelMd,
     color: colors.onSurface,
     marginBottom: spacing.sm,
+  },
+  stepLead: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.45),
+    color: colors.onSurfaceVariant,
+    marginBottom: spacing.md,
+  },
+  durationList: {
+    gap: spacing.sm,
+  },
+  durationCard: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surfaceContainerLowest,
+    padding: spacing.md,
+    gap: 4,
+  },
+  durationCardOn: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryContainer,
+  },
+  durationLabel: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    color: colors.onSurface,
+  },
+  durationSub: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelSm,
+    color: colors.onSurfaceVariant,
   },
   rosterPick: {
     padding: spacing.md,
@@ -1574,6 +1945,28 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.labelMd,
     color: colors.onPrimary,
+  },
+  finalStartBtn: {
+    marginTop: spacing.md,
+    paddingVertical: 20,
+    borderRadius: radii.lg,
+  },
+  reviewCard: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surfaceContainerLowest,
+    padding: spacing.md,
+    gap: 8,
+  },
+  reviewRow: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.bodyMd,
+    color: colors.onSurfaceVariant,
+  },
+  reviewStrong: {
+    fontFamily: fontFamily.semiBold,
+    color: colors.onSurface,
   },
   endBtn: {
     marginTop: spacing.lg,
@@ -1645,5 +2038,128 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     marginTop: 4,
+  },
+  customBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  customLayer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    zIndex: 20,
+  },
+  customSheet: {
+    position: 'relative',
+    borderTopLeftRadius: radii.lg,
+    borderTopRightRadius: radii.lg,
+    backgroundColor: colors.surface,
+    paddingHorizontal: containerMargin,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
+    gap: spacing.md,
+  },
+  customTitle: {
+    fontFamily: fontFamily.bold,
+    fontSize: typeScale.titleLg,
+    color: colors.onSurface,
+    textAlign: 'center',
+  },
+  customSub: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelSm,
+    color: colors.onSurfaceVariant,
+    textAlign: 'center',
+    marginTop: -4,
+  },
+  wheelsWrap: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  wheelColumn: {
+    flex: 1,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surfaceContainerLowest,
+    overflow: 'hidden',
+  },
+  wheelLabel: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelSm,
+    color: colors.onSurfaceVariant,
+    textAlign: 'center',
+    paddingTop: spacing.sm,
+  },
+  wheelViewport: {
+    position: 'relative',
+  },
+  wheelList: {
+    height: WHEEL_ROW_HEIGHT * WHEEL_VISIBLE_ROWS,
+  },
+  wheelPad: {
+    paddingVertical: WHEEL_ROW_HEIGHT * Math.floor(WHEEL_VISIBLE_ROWS / 2),
+  },
+  wheelRow: {
+    minHeight: WHEEL_ROW_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wheelRowText: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.bodyLg,
+    color: colors.onSurfaceVariant,
+  },
+  wheelRowTextOn: {
+    color: colors.primary,
+  },
+  wheelSelectionBand: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: WHEEL_ROW_HEIGHT * Math.floor(WHEEL_VISIBLE_ROWS / 2),
+    height: WHEEL_ROW_HEIGHT,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.primaryContainer,
+    backgroundColor: colors.primaryFixed,
+    opacity: 0.22,
+  },
+  customPreview: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelMd,
+    color: colors.onSurface,
+    textAlign: 'center',
+  },
+  customActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  customCancelBtn: {
+    flex: 1,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surfaceContainerLowest,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+  },
+  customCancelLabel: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelMd,
+    color: colors.onSurfaceVariant,
+  },
+  customUseBtn: {
+    flex: 1,
+    borderRadius: radii.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+  },
+  customUseLabel: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelMd,
+    color: colors.onPrimary,
   },
 });

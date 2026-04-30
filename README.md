@@ -15,11 +15,12 @@ This document is the **source of truth for technical implementation** of the cur
 - **Expo SDK 54** app with **Expo Router** (`expo-router/entry`).
 - **Product plan:** see **`JUNO_MVP.md`** in-repo for phased build goals and data model. **Phase 0 + Phase 1 + Phase 2 + Phase 4 + Phase 6 + Phase 7 + Phase 8** are implemented in this repo (Phase 4 was built before Phase 2; order in `JUNO_MVP.md` may differ).
 - **Onboarding route group (`/(onboarding)`)** — first-launch flow (Hook → Problem → Personalized Solution → Immersion → Paywall), progress dots, character art, permissions, invite step, demo first check, and subscription paywall entry. The prior Tea onboarding screen is currently bypassed for MVP.
-- **Home route (`/`)** — “**Safety Check**” (requires sign-in): **Juno** wordmark, dashed **upload screenshot** card (optional; still stubbed — `console.log` only), a single form card with **first name**, **last name**, **city** (optional), collapsible **more** (state, ZIP, DOB), **Run safety check** gradient CTA — calls Supabase Edge Function **`lookup-registry`** (Offenders.io on the server), then opens **`/registry/result`** with the saved `registry_checks` id. **Sign out** and disclaimer copy. No “signed in as” line on this screen.
-- **Map route (`/map`)** — **Phase 7 + 8 live circle map + date mode + safety signals + optional always-on location:** Foreground **`expo-location`** watch while **`/map` is focused** → **`update_my_live_location`**; optional **“Always share location”** (saved on **`profiles.share_location_always`**) enables **`expo-task-manager`** background updates + OS permissions (Life360-style; rebuild required). **Supabase Realtime** + poll on **`live_locations`**; **`list_friends_map_snapshots`** for pins. **`react-native-maps`**, camera tuned for dock + Circle sheet. Glass **search**; **Date mode** + **I'm safe** / **Alert circle** pushes; **`notify-date-mode-started`** on session start. Tables / migrations: **`live_locations`**, **`date_sessions`**, **`push_devices`**, **`profiles.share_location_always`** (`phase7_*`, `phase8_*`, **`20260429120000_profiles_share_location_always.sql`**).
+- **Default route (`/`)** — redirects to **`/map`** so Map is the app’s primary landing page after login.
+- **Protect route (`/protect`)** — “**Safety Check**” (requires sign-in): **Juno** wordmark, dashed **upload screenshot** card (optional; still stubbed — `console.log` only), a single form card with **first name**, **last name**, **city** (optional), collapsible **more** (state, ZIP, DOB), **Run safety check** gradient CTA — calls Supabase Edge Function **`lookup-registry`** (Offenders.io on the server), then opens **`/registry/result`** with the saved `registry_checks` id. **Sign out** and disclaimer copy. No “signed in as” line on this screen.
+- **Map route (`/map`)** — **Phase 7 + 8 live circle map + date mode + safety signals + optional always-on location:** Foreground **`expo-location`** watch while **`/map` is focused** → **`update_my_live_location`**; optional always-on sharing remains backed by **`profiles.share_location_always`** + **`expo-task-manager`** background updates and OS permissions (Life360-style; rebuild required). **Supabase Realtime** + poll on **`live_locations`**; **`list_friends_map_snapshots`** for pins. **`react-native-maps`**, camera tuned for dock + Circle sheet. Date mode is a 3-step wizard (duration → roster person → start), includes custom hour/minute wheel picker, and active sessions show a red Date Mode FAB with live countdown (`mm:ss` / `h:mm:ss`). Tables / migrations: **`live_locations`**, **`date_sessions`**, **`push_devices`**, **`profiles.share_location_always`** (`phase7_*`, `phase8_*`, **`20260429120000_profiles_share_location_always.sql`**).
 - **Report route (`/report`)** — **Legacy / demo** “background check” UI (initials avatar, verification copy, share-with-circle sheet). **Not** the primary path from **`/`** today; the live registry flow is **`/` → `/registry/result`**.
 - **Auth route (`/auth`)** — email/password **sign in** and **sign up** (`signInWithPassword` / `signUp`); bouncy `ScrollView` + `KeyboardAvoidingView` so primary actions stay reachable when the keyboard is open. Onboarding auth step currently routes to this existing phone/email path (Apple/Google onboarding buttons removed for now).
-- **Shared `AppDock`** — `components/AppDock.tsx`: **Protect · Roster · Map · Circles**; Protect ↔ `/`, Roster ↔ `/roster`, Map ↔ `/map`, Circles ↔ `/circles` via `router.replace` (instant transition: root **`Stack`** uses **`animation: 'none'`**). For current MVP scope, `/circles` redirects to `/circles/settings`.
+- **Shared `AppDock`** — `components/AppDock.tsx`: **Map · Protect · Roster · Circles**; Map ↔ `/map`, Protect ↔ `/protect`, Roster ↔ `/roster`, Circles ↔ `/circles` via `router.replace` (instant transition: root **`Stack`** uses `animation: 'none'`). For current MVP scope, `/circles` redirects to `/circles/settings`.
 - **Roster routes** (all protected): **`/roster`** list with empty states + archived filter, **`/roster/add`** manual add flow, and **`/roster/[id]`** person profile with notes, edit/delete/archive, **registry check** history + link to **`/registry/lookup`**, and **Phase 4** chat screenshot upload + summaries.
 - **Registry routes** (protected): **`/registry/lookup`** (standalone lookup, optional `rosterPersonId` when opened from a person), **`/registry/result`** — Offenders.io-backed matches (photos sorted first; tap photo for full-screen), **Save to roster** / **merge into existing person**.
 - **Global design tokens** under `/theme` (colors, typography, spacing, radii, layout, shadows, **`mapGoogleStyle.ts`** for map JSON, **`getDockOuterHeight()`** for layout math). **`theme/shadows.ts`** tints use **`colors`** (e.g. primary / primaryContainer) instead of hardcoded purple hex where applicable.
@@ -127,7 +128,8 @@ juno/
 ├── app/
 │   ├── _layout.tsx      # Root layout: fonts, splash, SafeAreaProvider, AuthProvider, route guard
 │   ├── auth.tsx         # Route `/auth` — email/password auth (sign in + sign up)
-│   ├── index.tsx        # Route `/` — Safety Check: form + Run safety check → registry
+│   ├── index.tsx        # Route `/` — redirects to `/map` (default landing)
+│   ├── protect.tsx      # Route `/protect` — Safety Check: form + Run safety check → registry
 │   ├── (onboarding)/    # Onboarding stack (first-launch gated; tea step bypassed for MVP)
 │   │   ├── _layout.tsx  # Onboarding stack: no headers
 │   │   ├── welcome.tsx ... paywall.tsx # Hook → Paywall flow screens
@@ -145,7 +147,7 @@ juno/
 │       ├── add.tsx      # Route `/roster/add` manual add flow
 │       └── [id].tsx     # Route `/roster/[id]` profile edit + archive/delete + chat uploads
 ├── components/
-│   ├── AppDock.tsx      # Shared bottom navigation (Protect / Map / …)
+│   ├── AppDock.tsx      # Shared bottom navigation (Map / Protect / Roster / Circles)
 │   ├── AnimatedCharacter.tsx # SVG character renderer (static; no animation)
 │   ├── onboarding/      # Shared onboarding primitives (screen/header/body/button/dots/character)
 │   ├── AppErrorState.tsx # App-wide error UI
@@ -216,7 +218,7 @@ juno/
 2. **`app/_layout.tsx`** imports **`lib/backgroundLocationTask`** once (registers the background location task), loads fonts, keeps native splash until fonts resolve (or error), then wraps the app in **`SafeAreaProvider`** + **`AuthProvider`**.
 3. Root guard now checks AsyncStorage key **`juno_onboarding_completed`**. If missing, user is routed into **`/(onboarding)/welcome`** first.
 4. After onboarding is completed, guard behavior applies: signed-out users redirect to `/auth`, signed-in users redirect away from `/auth`, with app-level loading/error states.
-3. **`app/index.tsx`** is the **default route** `/` (home); **`app/roster/index.tsx`** is **`/roster`**; **`app/map.tsx`** is **`/map`**; **`app/report.tsx`** is **`/report`**; **`app/registry/*`** are **`/registry/...`**. All of these (and other non-`/auth` stack routes) are **reachable only with a valid session** unless the route guard is extended later.
+3. **`app/index.tsx`** is the **default route** `/` and redirects to **`/map`**; **`app/protect.tsx`** is **`/protect`**; **`app/roster/index.tsx`** is **`/roster`**; **`app/map.tsx`** is **`/map`**; **`app/report.tsx`** is **`/report`**; **`app/registry/*`** are **`/registry/...`**. All of these (and other non-`/auth` stack routes) are **reachable only with a valid session** unless the route guard is extended later.
 
 ### 4.2 State on the home screen
 
@@ -286,7 +288,8 @@ juno/
 | Path | File | Purpose |
 |------|------|---------|
 | `/auth` | `app/auth.tsx` | Email/password auth (sign in + sign up); public when signed out |
-| `/` | `app/index.tsx` | Safety Check home → registry lookup + navigate to result (protected) |
+| `/` | `app/index.tsx` | Default landing redirect to `/map` (protected) |
+| `/protect` | `app/protect.tsx` | Safety Check home → registry lookup + navigate to result (protected) |
 | `/roster` | `app/roster/index.tsx` | Roster list + empty states + archived toggle (protected) |
 | `/roster/add` | `app/roster/add.tsx` | Manual Add Person flow (protected) |
 | `/roster/[id]` | `app/roster/[id].tsx` | Person profile + registry checks + chat uploads + archive/delete (protected) |
