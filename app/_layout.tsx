@@ -63,11 +63,19 @@ function RootNavigator() {
 
   useEffect(() => {
     let active = true;
-    void AsyncStorage.getItem(ONBOARDING_COMPLETION_KEY).then((value) => {
-      if (!active) return;
-      setOnboardingCompleted(value === 'true');
-      setOnboardingReady(true);
-    });
+    void AsyncStorage.getItem(ONBOARDING_COMPLETION_KEY)
+      .then((value) => {
+        if (!active) return;
+        setOnboardingCompleted(value === 'true');
+      })
+      .catch(() => {
+        if (!active) return;
+        setOnboardingCompleted(false);
+      })
+      .finally(() => {
+        if (!active) return;
+        setOnboardingReady(true);
+      });
     return () => {
       active = false;
     };

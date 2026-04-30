@@ -31,6 +31,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const supabase = getSupabase();
     let mounted = true;
 
+    const bootstrapSession = async () => {
+      try {
+        const { data, error: sessionError } = await supabase.auth.getSession();
+        if (!mounted) return;
+        if (sessionError) {
+          setError(sessionError.message);
+          setSession(null);
+          return;
+        }
+        const initialSession = data.session ?? null;
+        setSession(initialSession);
+        if (initialSession?.user) {
+          await ensureProfileForUser(initialSession.user);
+        }
+      } catch (bootstrapError) {
+        if (!mounted) return;
+        setError(
+          bootstrapError instanceof Error
+            ? bootstrapError.message
+            : 'Failed to initialize auth session.',
+        );
+        setSession(null);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (!mounted) return;
       setSession(nextSession ?? null);
@@ -44,8 +73,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           );
         });
       }
+      setLoading(false);
     });
-    setLoading(false);
+
+    void bootstrapSession();
 
     return () => {
       mounted = false;

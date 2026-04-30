@@ -1,4 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +17,7 @@ import {
 } from '../../lib/circles';
 import { ensureProfileForUser } from '../../lib/supabase';
 import { useAuth } from '../../providers/AuthProvider';
+import { useOnboardingStore } from '../../stores/onboardingStore';
 import { ambientCard, colors, containerMargin, fontFamily, getDockOuterHeight, lineHeight, radii, spacing, typeScale } from '../../theme';
 
 type PrivacyForm = {
@@ -41,8 +43,10 @@ function identityLabel(profile: {
 }
 
 export default function CirclesSettingsScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const resetOnboarding = useOnboardingStore((state) => state.resetOnboarding);
   const dockH = useMemo(() => getDockOuterHeight(insets.bottom), [insets.bottom]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -136,6 +140,16 @@ export default function CirclesSettingsScreen() {
     }
   }, [loadAll, privacyForm, user]);
 
+  const onResetOnboarding = useCallback(async () => {
+    try {
+      setErrorMsg(null);
+      await resetOnboarding();
+      router.replace('/(onboarding)/characters/welcome');
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'Failed to reset onboarding.');
+    }
+  }, [resetOnboarding, router]);
+
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
@@ -227,6 +241,22 @@ export default function CirclesSettingsScreen() {
           <TextInput value={privacyForm.phoneE164} onChangeText={(v) => setPrivacyForm((p) => ({ ...p, phoneE164: v }))} autoCapitalize="none" placeholder="Phone E.164" placeholderTextColor={colors.outline} style={styles.input} />
           <Pressable accessibilityRole="button" onPress={() => void savePrivacy()} style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}>
             <Text style={styles.primaryBtnText}>Save privacy settings</Text>
+          </Pressable>
+        </View>
+
+        <View style={[styles.card, ambientCard]}>
+          <Text style={styles.sectionTitle}>Developer</Text>
+          <Text style={styles.hint}>
+            Reset onboarding state on this device and restart the onboarding flow.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              void onResetOnboarding();
+            }}
+            style={({ pressed }) => [styles.outlineBtn, pressed && styles.pressed]}
+          >
+            <Text style={styles.outlineBtnText}>Reset onboarding</Text>
           </Pressable>
         </View>
       </ScrollView>
