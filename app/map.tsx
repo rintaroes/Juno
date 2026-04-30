@@ -16,8 +16,10 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Alert,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -88,7 +90,12 @@ const FRIEND_PIN_FOCUS_MS = 720;
 /** Self pin / map tap / tab focus: snap to you (near-instant) */
 const SELF_PIN_FOCUS_MS = 1;
 /** Must match `styles.sheet.maxHeight` — used to offset camera so “You” sits in visible map above sheet + dock */
-const CIRCLE_SHEET_MAX_HEIGHT = 360;
+const CIRCLE_SHEET_MAX_HEIGHT = 240;
+/** Keep a visible lip at dock top so users can always drag/toggle back up. */
+const CIRCLE_SHEET_PEEK_HEIGHT = 26;
+const CIRCLE_SHEET_COLLAPSED_OFFSET = CIRCLE_SHEET_MAX_HEIGHT - CIRCLE_SHEET_PEEK_HEIGHT;
+const SHEET_VELOCITY_SNAP = 0.45;
+const SHEET_BOTTOM_SNAP_DISTANCE = 52;
 /** On-map initials disc — same diameter for you and every friend */
 const MAP_PIN_MARKER_SIZE = 56;
 
@@ -263,9 +270,13 @@ export default function MapScreen() {
   const [shareLocationAlways, setShareLocationAlways] = useState(false);
   const [shareLocationToggling, setShareLocationToggling] = useState(false);
   const [tick, setTick] = useState(0);
+  const [sheetExpanded, setSheetExpanded] = useState(true);
+  const sheetTranslateY = useRef(new Animated.Value(0)).current;
+  const sheetOffsetRef = useRef(0);
 
   const dockH = useMemo(() => getDockOuterHeight(insets.bottom), [insets.bottom]);
-  const sheetBottom = dockH + spacing.sm;
+  /** Treat dock top as hard bottom boundary for dragging/snap. */
+  const sheetBottom = dockH;
   /** Dock + circle sheet overlap the map; shift camera center south so your pin sits in the middle of the *visible* map (Find My–style). */
   const bottomChromePx = sheetBottom + CIRCLE_SHEET_MAX_HEIGHT;
 
@@ -282,6 +293,56 @@ export default function MapScreen() {
       };
     },
     [windowHeight, bottomChromePx],
+  );
+
+  const animateSheetTo = useCallback(
+    (toValue: number) => {
+      sheetOffsetRef.current = toValue;
+      setSheetExpanded(toValue <= 16);
+      Animated.spring(sheetTranslateY, {
+        toValue,
+        useNativeDriver: true,
+        damping: 24,
+        stiffness: 220,
+        mass: 0.9,
+      }).start();
+    },
+    [sheetTranslateY],
+  );
+
+  const sheetPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_evt, gestureState) =>
+          Math.abs(gestureState.dy) > 4 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+        onPanResponderGrant: () => {
+          sheetTranslateY.stopAnimation((value) => {
+            sheetOffsetRef.current = value;
+          });
+        },
+        onPanResponderMove: (_evt, gestureState) => {
+          const next = Math.max(
+            0,
+            Math.min(CIRCLE_SHEET_COLLAPSED_OFFSET, sheetOffsetRef.current + gestureState.dy),
+          );
+          sheetTranslateY.setValue(next);
+        },
+        onPanResponderRelease: (_evt, gestureState) => {
+          const current = sheetOffsetRef.current + gestureState.dy;
+          const clamped = Math.max(0, Math.min(CIRCLE_SHEET_COLLAPSED_OFFSET, current));
+          const fastDown = gestureState.vy >= SHEET_VELOCITY_SNAP;
+          const distanceToBottom = CIRCLE_SHEET_COLLAPSED_OFFSET - clamped;
+          const nearBottom = distanceToBottom <= SHEET_BOTTOM_SNAP_DISTANCE;
+
+          if (fastDown || nearBottom) {
+            animateSheetTo(CIRCLE_SHEET_COLLAPSED_OFFSET);
+            return;
+          }
+          animateSheetTo(0);
+        },
+      }),
+    [animateSheetTo, sheetTranslateY],
   );
 
   useEffect(() => {
@@ -840,26 +901,35 @@ export default function MapScreen() {
           <Text style={styles.dateFabLabel}>Date mode</Text>
         </Pressable>
 
-        <View
+        <Animated.View
           style={[
             styles.sheet,
             {
               bottom: sheetBottom,
-              left: spacing.sm,
-              right: spacing.sm,
+              left: 0,
+              right: 0,
+              transform: [{ translateY: sheetTranslateY }],
             },
           ]}
         >
-          <BlurView intensity={50} tint="light" style={StyleSheet.absoluteFill} />
           <View style={styles.sheetTint} />
-          <View style={styles.sheetHandle}>
+          <View style={styles.sheetHandle} {...sheetPanResponder.panHandlers}>
             <View style={styles.sheetGrab} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={sheetExpanded ? 'Collapse circle sheet' : 'Expand circle sheet'}
+              onPress={() => {
+                animateSheetTo(sheetExpanded ? CIRCLE_SHEET_COLLAPSED_OFFSET : 0);
+              }}
+              style={styles.sheetToggleHit}
+            />
           </View>
           <Text style={styles.sheetTitle}>Circle</Text>
           <ScrollView
             style={styles.sheetScroll}
             contentContainerStyle={styles.sheetScrollInner}
             showsVerticalScrollIndicator={false}
+            scrollEnabled={sheetExpanded}
           >
             {user?.id && Platform.OS !== 'web' ? (
               <View style={styles.shareAlwaysRow}>
@@ -944,7 +1014,8 @@ export default function MapScreen() {
               })
             )}
           </ScrollView>
-        </View>
+        </Animated.View>
+
       </View>
 
       <Modal
@@ -1170,7 +1241,7 @@ export default function MapScreen() {
         </View>
       </Modal>
 
-      <AppDock />
+      <AppDock variant="connected" />
     </View>
   );
 }
@@ -1267,36 +1338,36 @@ const styles = StyleSheet.create({
   },
   sheet: {
     position: 'absolute',
-    zIndex: 30,
-    maxHeight: CIRCLE_SHEET_MAX_HEIGHT,
-    borderRadius: 24,
+    zIndex: 120,
+    height: CIRCLE_SHEET_MAX_HEIGHT,
+    borderTopLeftRadius: radii.dockTop,
+    borderTopRightRadius: radii.dockTop,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
     overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: -8 },
-        shadowOpacity: 0.12,
-        shadowRadius: 30,
-      },
-      android: { elevation: 10 },
-      default: {},
-    }),
   },
   sheetTint: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.88)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
+    backgroundColor: colors.white,
+    borderWidth: 0,
   },
   sheetHandle: {
     paddingVertical: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   sheetGrab: {
     width: 48,
     height: 6,
     borderRadius: 3,
     backgroundColor: 'rgba(201, 196, 213, 0.45)',
+  },
+  sheetToggleHit: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
   },
   sheetTitle: {
     paddingHorizontal: spacing.md,
@@ -1306,11 +1377,11 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
   },
   sheetScroll: {
-    maxHeight: 268,
+    flex: 1,
   },
   sheetScrollInner: {
     paddingHorizontal: 12,
-    paddingBottom: 12,
+    paddingBottom: 4,
     gap: 8,
   },
   shareAlwaysRow: {

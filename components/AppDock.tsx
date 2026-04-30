@@ -11,8 +11,8 @@ import {
   colors,
   dockPaddingBottom,
   dockPaddingTop,
-  dockShadowUp,
   fontFamily,
+  spacing,
   typeScale,
 } from '../theme';
 import { radii } from '../theme/radii';
@@ -31,7 +31,11 @@ const TABS: {
   { id: 'circles', label: 'Circles', href: '/circles', icon: UsersRound },
 ];
 
-export function AppDock() {
+export function AppDock({
+  variant = 'default',
+}: {
+  variant?: 'default' | 'floating' | 'connected';
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
@@ -49,7 +53,11 @@ export function AppDock() {
     <View
       style={[
         styles.dock,
-        dockShadowUp,
+        variant === 'floating'
+          ? styles.dockFloating
+          : variant === 'connected'
+            ? styles.dockConnected
+            : styles.dockDefault,
         {
           paddingTop: dockPaddingTop,
           paddingBottom: dockPaddingBottom + bottom,
@@ -94,18 +102,37 @@ export function AppDock() {
 const styles = StyleSheet.create({
   dock: {
     position: 'absolute',
-    left: 0,
-    right: 0,
+    zIndex: 220,
     bottom: 0,
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'flex-start',
     paddingHorizontal: 16,
     backgroundColor: colors.white,
-    borderTopWidth: 1,
-    borderTopColor: '#f8fafc',
+    borderTopWidth: 0,
+  },
+  dockDefault: {
+    left: 0,
+    right: 0,
     borderTopLeftRadius: radii.dockTop,
     borderTopRightRadius: radii.dockTop,
+  },
+  dockFloating: {
+    left: spacing.sm,
+    right: spacing.sm,
+    bottom: spacing.md,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    borderWidth: 1,
+    borderColor: '#f8fafc',
+  },
+  dockConnected: {
+    left: 0,
+    right: 0,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
   },
   dockItem: {
     alignItems: 'center',
