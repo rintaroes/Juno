@@ -276,7 +276,7 @@ export default function MapScreen() {
 
   const dockH = useMemo(() => getDockOuterHeight(insets.bottom), [insets.bottom]);
   /** Treat dock top as hard bottom boundary for dragging/snap. */
-  const sheetBottom = dockH;
+  const sheetBottom = dockH - 2;
   /** Dock + circle sheet overlap the map; shift camera center south so your pin sits in the middle of the *visible* map (Find My–style). */
   const bottomChromePx = sheetBottom + CIRCLE_SHEET_MAX_HEIGHT;
 
