@@ -21,9 +21,13 @@ export default function CircleScreen() {
   useOnboardingStep(13, 'circle');
 
   useEffect(() => {
-    void Contacts.requestPermissionsAsync().then(({ status }) => {
-      setPermission('contacts', status === 'granted');
-    });
+    void Contacts.requestPermissionsAsync()
+      .then(({ status }) => {
+        setPermission('contacts', status === 'granted');
+      })
+      .catch(() => {
+        setPermission('contacts', false);
+      });
   }, [setPermission]);
 
   const slotCount = useMemo(() => Math.max(3, invitedFriends.length), [invitedFriends.length]);

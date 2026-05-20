@@ -4,7 +4,7 @@ import { colors, fontFamily, lineHeight, typeScale } from '../theme';
 export function AppLoading({ label = 'Loading Juno...' }: { label?: string }) {
   return (
     <View style={styles.container}>
-      <ActivityIndicator color={colors.primary} size="large" />
+      <ActivityIndicator color={colors.cta} size="large" />
       <Text style={styles.label}>{label}</Text>
     </View>
   );
@@ -16,7 +16,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.paper,
   },
   label: {
     fontFamily: fontFamily.medium,

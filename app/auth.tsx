@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ComponentProps } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -9,18 +9,49 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { ArrowLeft } from 'lucide-react-native';
+import { ChevronLeft } from 'lucide-react-native';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppErrorState } from '../components/AppErrorState';
 import { AppLoading } from '../components/AppLoading';
+import { Button } from '../components/ui/Button';
+import { ScreenGradient } from '../components/ui/ScreenGradient';
 import { getSupabase } from '../lib/supabase';
 import { useAuth } from '../providers/AuthProvider';
-import { colors, fontFamily, lineHeight, radii, spacing, typeScale } from '../theme';
+import {
+  colors,
+  containerMargin,
+  fontFamily,
+  lineHeight,
+  radii,
+  spacing,
+  typeScale,
+} from '../theme';
 
 type Mode = 'sign_in' | 'sign_up';
 
+function AuthField({
+  label,
+  ...inputProps
+}: {
+  label: string;
+} & ComponentProps<typeof TextInput>) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        placeholderTextColor={colors.meta}
+        style={styles.input}
+        {...inputProps}
+      />
+    </View>
+  );
+}
+
 export default function AuthScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ fromOnboarding?: string; returnTo?: string }>();
   const fromOnboardingRaw = Array.isArray(params.fromOnboarding)
     ? params.fromOnboarding[0]
@@ -40,6 +71,8 @@ export default function AuthScreen() {
     () => email.trim().length > 4 && password.length >= 6 && !pending,
     [email, password, pending],
   );
+
+  const isSignIn = mode === 'sign_in';
 
   if (loading) return <AppLoading label="Checking session..." />;
   if (session) return <Redirect href="/map" />;
@@ -76,97 +109,119 @@ export default function AuthScreen() {
     }
   };
 
+  const onBack = () => {
+    if (isFromOnboarding) {
+      router.replace(returnTo);
+      return;
+    }
+    if (router.canGoBack()) {
+      router.back();
+    }
+  };
+
+  const showBack = isFromOnboarding || router.canGoBack();
+
+  const toggleMode = () => {
+    setMode((prev) => (prev === 'sign_in' ? 'sign_up' : 'sign_in'));
+    setMessage(null);
+    setError(null);
+  };
+
   return (
     <View style={styles.screen}>
+      <StatusBar style="dark" />
+      <ScreenGradient />
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardAvoid}
       >
-        <ScrollView
-          bounces
-          alwaysBounceVertical
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
+        <View
+          style={[
+            styles.shell,
+            {
+              paddingTop: insets.top + spacing.sm,
+              paddingBottom: Math.max(insets.bottom, spacing.lg),
+            },
+          ]}
         >
-          <View style={styles.card}>
-            {isFromOnboarding ? (
+          <View style={styles.topBar}>
+            {showBack ? (
               <Pressable
                 accessibilityRole="button"
-                onPress={() => router.replace(returnTo)}
+                accessibilityLabel="Go back"
+                hitSlop={12}
+                onPress={onBack}
                 style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
               >
-                <ArrowLeft color={colors.onSurface} size={18} strokeWidth={2} />
-                <Text style={styles.backLabel}>Back</Text>
+                <ChevronLeft color={colors.ink} size={24} strokeWidth={1.75} />
               </Pressable>
-            ) : null}
-            <Text style={styles.brand}>Juno</Text>
-            <Text style={styles.title}>
-              {mode === 'sign_up' ? 'Create your account' : 'Sign in'}
-            </Text>
-
-            <TextInput
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="email-address"
-              textContentType="emailAddress"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="Email"
-              placeholderTextColor={colors.outline}
-              style={styles.input}
-            />
-            <TextInput
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry
-              textContentType="password"
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Password (6+ chars)"
-              placeholderTextColor={colors.outline}
-              style={styles.input}
-            />
-
-            <Pressable
-              accessibilityRole="button"
-              disabled={!canSubmit}
-              onPress={onSubmit}
-              style={({ pressed }) => [
-                styles.cta,
-                (!canSubmit || pending) && styles.ctaDisabled,
-                pressed && canSubmit && styles.pressed,
-              ]}
-            >
-              <Text style={styles.ctaLabel}>
-                {pending
-                  ? 'Working...'
-                  : mode === 'sign_up'
-                    ? 'Create account'
-                    : 'Sign in'}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                setMode((prev) => (prev === 'sign_in' ? 'sign_up' : 'sign_in'));
-                setMessage(null);
-                setError(null);
-              }}
-              style={({ pressed }) => [styles.switchMode, pressed && styles.pressed]}
-            >
-              <Text style={styles.switchModeLabel}>
-                {mode === 'sign_in'
-                  ? "Don't have an account? Create one"
-                  : 'Already have an account? Sign in'}
-              </Text>
-            </Pressable>
-
-            {message ? <Text style={styles.message}>{message}</Text> : null}
+            ) : (
+              <View style={styles.backPlaceholder} />
+            )}
+            <Text style={styles.wordmark}>Juno</Text>
+            <View style={styles.backPlaceholder} />
           </View>
-        </ScrollView>
+
+          <ScrollView
+            bounces
+            alwaysBounceVertical
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.title}>{isSignIn ? 'Sign in' : 'Create account'}</Text>
+            <Text style={styles.subtitle}>Please enter your details.</Text>
+
+            <View style={styles.form}>
+              <AuthField
+                label="Email"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                textContentType="emailAddress"
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Enter your email"
+              />
+              <AuthField
+                label="Password"
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+                textContentType={isSignIn ? 'password' : 'newPassword'}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Password (6+ characters)"
+              />
+
+              <View style={styles.ctaWrap}>
+                <Button
+                  label={isSignIn ? 'Sign in' : 'Create account'}
+                  disabled={!canSubmit}
+                  loading={pending}
+                  onPress={onSubmit}
+                />
+              </View>
+
+              {message ? <Text style={styles.message}>{message}</Text> : null}
+            </View>
+          </ScrollView>
+
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>
+              {isSignIn ? "Don't have an account? " : 'Already have an account? '}
+              <Text
+                accessibilityRole="link"
+                onPress={toggleMode}
+                style={styles.footerLink}
+              >
+                {isSignIn ? 'Create one' : 'Sign in'}
+              </Text>
+            </Text>
+          </View>
+        </View>
       </KeyboardAvoidingView>
     </View>
   );
@@ -175,103 +230,118 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.paper,
   },
   keyboardAvoid: {
     flex: 1,
   },
-  scrollContent: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.lg,
+  shell: {
+    flex: 1,
+    zIndex: 1,
   },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    gap: spacing.sm,
-    padding: spacing.lg,
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    backgroundColor: colors.surfaceContainerLowest,
-  },
-  backBtn: {
-    alignSelf: 'flex-start',
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.xs,
-    marginBottom: spacing.xs,
+    justifyContent: 'space-between',
+    paddingHorizontal: containerMargin,
+    minHeight: 44,
+    marginBottom: spacing.lg,
   },
-  backLabel: {
-    fontFamily: fontFamily.medium,
-    fontSize: typeScale.labelMd,
-    color: colors.onSurface,
+  backBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -8,
   },
-  brand: {
+  backPlaceholder: {
+    width: 44,
+    height: 44,
+  },
+  wordmark: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     textAlign: 'center',
-    fontFamily: fontFamily.extraBold,
-    fontSize: typeScale.bodyLg,
-    lineHeight: lineHeight(typeScale.bodyLg, 1.2),
-    color: colors.indigo500,
-    marginBottom: spacing.xs,
+    fontFamily: fontFamily.display,
+    fontSize: typeScale.wordmark,
+    lineHeight: lineHeight(typeScale.wordmark, 1.15),
+    color: colors.ink,
+    pointerEvents: 'none',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: containerMargin,
+    paddingBottom: spacing.lg,
   },
   title: {
-    textAlign: 'center',
-    fontFamily: fontFamily.bold,
-    fontSize: typeScale.titleLg,
-    lineHeight: lineHeight(typeScale.titleLg, 1.3),
-    color: colors.onSurface,
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: typeScale.headlineLg,
+    lineHeight: lineHeight(typeScale.headlineLg, 1.1),
+    color: colors.ink,
+    letterSpacing: -0.5,
     marginBottom: spacing.sm,
+  },
+  subtitle: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.45),
+    color: colors.inkBody,
+    marginBottom: spacing.xl,
+  },
+  form: {
+    gap: spacing.md,
+  },
+  field: {
+    gap: spacing.xs,
+  },
+  fieldLabel: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelMd,
+    lineHeight: lineHeight(typeScale.labelMd, 1.3),
+    color: colors.ink,
   },
   input: {
     width: '100%',
-    minHeight: 48,
+    minHeight: 52,
     borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    borderRadius: radii.input,
+    borderColor: colors.ghostBorder,
+    borderRadius: radii.button,
     paddingHorizontal: spacing.md,
     fontFamily: fontFamily.regular,
     fontSize: typeScale.bodyMd,
     lineHeight: lineHeight(typeScale.bodyMd, 1.4),
-    color: colors.onSurface,
-    backgroundColor: colors.surface,
+    color: colors.ink,
+    backgroundColor: colors.card,
   },
-  cta: {
+  ctaWrap: {
     marginTop: spacing.sm,
-    minHeight: 48,
-    borderRadius: radii.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-  },
-  ctaDisabled: {
-    opacity: 0.5,
-  },
-  ctaLabel: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.bodyMd,
-    color: colors.onPrimary,
-  },
-  switchMode: {
-    paddingVertical: spacing.xs,
-    alignItems: 'center',
-  },
-  switchModeLabel: {
-    fontFamily: fontFamily.medium,
-    fontSize: typeScale.labelMd,
-    color: colors.primary,
   },
   message: {
     marginTop: spacing.xs,
     textAlign: 'center',
     fontFamily: fontFamily.regular,
     fontSize: typeScale.labelSm,
-    lineHeight: lineHeight(typeScale.labelSm, 1.4),
-    color: colors.onSurfaceVariant,
+    lineHeight: lineHeight(typeScale.labelSm, 1.45),
+    color: colors.meta,
+  },
+  footer: {
+    paddingHorizontal: containerMargin,
+    paddingTop: spacing.md,
+    alignItems: 'center',
+  },
+  footerText: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.45),
+    color: colors.inkBody,
+    textAlign: 'center',
+  },
+  footerLink: {
+    fontFamily: fontFamily.semiBold,
+    color: colors.cta,
   },
   pressed: {
-    opacity: 0.85,
+    opacity: 0.88,
   },
 });

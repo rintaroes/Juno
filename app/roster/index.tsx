@@ -1,8 +1,9 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Plus, UserRound } from 'lucide-react-native';
+import { Archive, Pencil, Plus, UserRound } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -10,9 +11,12 @@ import {
   Text,
   View,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppDock } from '../../components/AppDock';
+import { ScreenGradient } from '../../components/ui/ScreenGradient';
 import { listRosterPeople, type RosterPerson } from '../../lib/roster';
+import { rosterAvatarColor, rosterInitials } from '../../lib/rosterPresentation';
 import { useAuth } from '../../providers/AuthProvider';
 import {
   ambientCard,
@@ -25,11 +29,6 @@ import {
   spacing,
   typeScale,
 } from '../../theme';
-
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/).slice(0, 2);
-  return parts.map((part) => part[0]?.toUpperCase() ?? '').join('') || '?';
-}
 
 function formatSecondary(person: RosterPerson) {
   const bits: string[] = [];
@@ -78,7 +77,10 @@ export default function RosterListScreen() {
 
   return (
     <View style={styles.screen}>
+      <StatusBar style="dark" />
+      <ScreenGradient />
       <ScrollView
+        style={styles.scroll}
         contentContainerStyle={[
           styles.content,
           {
@@ -89,7 +91,7 @@ export default function RosterListScreen() {
         ]}
         refreshControl={
           <RefreshControl
-            tintColor={colors.primary}
+            tintColor={colors.cta}
             refreshing={refreshing}
             onRefresh={() => {
               void load(true);
@@ -100,7 +102,6 @@ export default function RosterListScreen() {
       >
         <View style={styles.headerRow}>
           <View style={styles.titleWrap}>
-            <Text style={styles.brand}>Juno</Text>
             <Text style={styles.title}>Roster</Text>
             <Text style={styles.subtitle}>
               Keep private notes and context on people you have checked.
@@ -117,33 +118,49 @@ export default function RosterListScreen() {
           </Pressable>
         </View>
 
-        <Pressable
-          onPress={() => {
-            setShowArchived((prev) => !prev);
-          }}
-          style={({ pressed }) => [
-            styles.filterBtn,
-            showArchived && styles.filterBtnActive,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Text
-            style={[
-              styles.filterBtnLabel,
-              showArchived && styles.filterBtnLabelActive,
+        <View style={styles.segment}>
+          <Pressable
+            onPress={() => {
+              setShowArchived(false);
+            }}
+            style={({ pressed }) => [
+              styles.segmentHalf,
+              !showArchived && styles.segmentHalfActive,
+              pressed && styles.pressed,
             ]}
           >
-            {showArchived ? 'Showing archived entries' : 'Showing active entries'}
-          </Text>
-        </Pressable>
+            <Text style={[styles.segmentLabel, !showArchived && styles.segmentLabelActive]}>
+              Active
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setShowArchived(true);
+            }}
+            style={({ pressed }) => [
+              styles.segmentHalf,
+              showArchived && styles.segmentHalfActive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Archive
+              size={16}
+              color={showArchived ? colors.white : colors.meta}
+              strokeWidth={2}
+            />
+            <Text style={[styles.segmentLabel, showArchived && styles.segmentLabelActive]}>
+              Archived
+            </Text>
+          </Pressable>
+        </View>
 
         {loading ? (
           <View style={styles.loadingWrap}>
-            <ActivityIndicator color={colors.primary} />
+            <ActivityIndicator color={colors.cta} />
             <Text style={styles.loadingText}>Loading roster...</Text>
           </View>
         ) : error ? (
-          <View style={[styles.emptyCard, ambientCard]}>
+          <View style={[styles.panelCard, ambientCard]}>
             <Text style={styles.emptyTitle}>Could not load your roster</Text>
             <Text style={styles.emptyBody}>{error}</Text>
             <Pressable
@@ -156,14 +173,14 @@ export default function RosterListScreen() {
             </Pressable>
           </View>
         ) : rows.length === 0 ? (
-          <View style={[styles.emptyCard, ambientCard]}>
+          <View style={[styles.panelCard, ambientCard]}>
             <View style={styles.emptyIconWrap}>
-              <UserRound size={22} color={colors.primary} strokeWidth={2.2} />
+              <UserRound size={22} color={colors.cta} strokeWidth={2.2} />
             </View>
             <Text style={styles.emptyTitle}>Your roster is empty</Text>
             <Text style={styles.emptyBody}>
-              Add someone manually now. Registry and image lookup results will attach
-              here in later phases.
+              Add someone manually now. Registry and image lookup results will attach here in later
+              phases.
             </Text>
             <Pressable
               onPress={() => {
@@ -178,36 +195,39 @@ export default function RosterListScreen() {
           <View style={styles.list}>
             {rows.map((person) => {
               const secondary = formatSecondary(person);
+              const notesLine = person.notes?.trim()
+                ? person.notes
+                : 'No notes yet.';
               return (
                 <Pressable
                   key={person.id}
                   onPress={() => {
                     router.push(`/roster/${person.id}`);
                   }}
-                  style={({ pressed }) => [
-                    styles.rowCard,
-                    ambientCard,
-                    pressed && styles.pressed,
-                  ]}
+                  style={({ pressed }) => [styles.rowCard, ambientCard, pressed && styles.pressed]}
                 >
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{initials(person.display_name)}</Text>
+                  <View
+                    style={[
+                      styles.avatar,
+                      { backgroundColor: rosterAvatarColor(person.id) },
+                    ]}
+                  >
+                    <Text style={styles.avatarText}>{rosterInitials(person.display_name)}</Text>
                   </View>
                   <View style={styles.rowMain}>
                     <Text style={styles.rowName} numberOfLines={1}>
                       {person.display_name}
                     </Text>
                     {secondary ? (
-                      <Text style={styles.rowSecondary} numberOfLines={1}>
+                      <Text style={styles.rowMeta} numberOfLines={1}>
                         {secondary}
                       </Text>
                     ) : null}
                     <Text style={styles.rowNotes} numberOfLines={2}>
-                      {person.notes?.trim()
-                        ? person.notes
-                        : 'No notes yet. Tap to add context.'}
+                      {notesLine}
                     </Text>
                   </View>
+                  <Pencil color={colors.cta} size={20} strokeWidth={1.75} />
                 </Pressable>
               );
             })}
@@ -222,11 +242,15 @@ export default function RosterListScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.paper,
+  },
+  scroll: {
+    flex: 1,
+    zIndex: 1,
   },
   content: {
     flexGrow: 1,
-    gap: spacing.md,
+    gap: spacing.lg,
   },
   headerRow: {
     flexDirection: 'row',
@@ -236,60 +260,73 @@ const styles = StyleSheet.create({
   },
   titleWrap: {
     flex: 1,
-  },
-  brand: {
-    fontFamily: fontFamily.extraBold,
-    fontSize: typeScale.bodyLg,
-    color: colors.indigo500,
-    marginBottom: spacing.xs,
+    minWidth: 0,
   },
   title: {
-    fontFamily: fontFamily.bold,
-    fontSize: typeScale.headlineMd,
-    lineHeight: lineHeight(typeScale.headlineMd, 1.2),
-    color: colors.primary,
+    fontFamily: fontFamily.displayItalic,
+    fontSize: typeScale.headlineLg,
+    lineHeight: lineHeight(typeScale.headlineLg, 1.12),
+    color: colors.ink,
+    letterSpacing: -0.4,
   },
   subtitle: {
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
     fontFamily: fontFamily.regular,
     fontSize: typeScale.labelMd,
     lineHeight: lineHeight(typeScale.labelMd, 1.45),
-    color: colors.onSurfaceVariant,
+    color: colors.meta,
   },
   addBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.cta,
     borderRadius: radii.full,
     paddingHorizontal: 14,
     paddingVertical: 9,
+    ...Platform.select({
+      ios: {
+        shadowColor: colors.ctaShadow,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 10,
+      },
+      android: { elevation: 3 },
+      default: {},
+    }),
   },
   addBtnLabel: {
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.labelMd,
     color: colors.onPrimary,
   },
-  filterBtn: {
-    alignSelf: 'flex-start',
-    borderRadius: radii.full,
+  segment: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  segmentHalf: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 14,
+    borderRadius: radii.xl,
+    backgroundColor: colors.surfaceSecondary,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
-    backgroundColor: colors.surfaceContainerLowest,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
   },
-  filterBtnActive: {
-    borderColor: colors.primaryContainer,
-    backgroundColor: colors.primaryFixed,
+  segmentHalfActive: {
+    backgroundColor: colors.ink,
+    borderColor: colors.ink,
   },
-  filterBtnLabel: {
-    fontFamily: fontFamily.medium,
-    fontSize: typeScale.labelSm,
-    color: colors.onSurfaceVariant,
+  segmentLabel: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelMd,
+    color: colors.meta,
   },
-  filterBtnLabelActive: {
-    color: colors.primary,
+  segmentLabelActive: {
+    color: colors.white,
   },
   loadingWrap: {
     marginTop: spacing.lg,
@@ -299,13 +336,13 @@ const styles = StyleSheet.create({
   loadingText: {
     fontFamily: fontFamily.regular,
     fontSize: typeScale.labelMd,
-    color: colors.onSurfaceVariant,
+    color: colors.meta,
   },
-  emptyCard: {
-    marginTop: spacing.md,
+  panelCard: {
+    marginTop: spacing.xs,
     borderRadius: radii.lg,
     padding: spacing.lg,
-    backgroundColor: colors.surfaceContainerLowest,
+    backgroundColor: colors.card,
     alignItems: 'center',
     gap: spacing.sm,
   },
@@ -320,20 +357,20 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.bodyLg,
-    color: colors.onSurface,
+    color: colors.ink,
     textAlign: 'center',
   },
   emptyBody: {
     fontFamily: fontFamily.regular,
     fontSize: typeScale.labelMd,
     lineHeight: lineHeight(typeScale.labelMd, 1.45),
-    color: colors.onSurfaceVariant,
+    color: colors.meta,
     textAlign: 'center',
   },
   primaryAction: {
     marginTop: spacing.xs,
     borderRadius: radii.full,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.cta,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
@@ -349,35 +386,37 @@ const styles = StyleSheet.create({
     borderColor: colors.outlineVariant,
     paddingHorizontal: 16,
     paddingVertical: 9,
+    backgroundColor: colors.surfaceSecondary,
   },
   retryLabel: {
     fontFamily: fontFamily.medium,
-    color: colors.onSurface,
+    color: colors.ink,
   },
   list: {
     gap: spacing.sm,
     paddingBottom: spacing.sm,
   },
   rowCard: {
-    borderRadius: radii.lg,
-    backgroundColor: colors.surfaceContainerLowest,
-    padding: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.card,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
     flexDirection: 'row',
     gap: spacing.md,
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   avatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: colors.primaryFixed,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    fontFamily: fontFamily.bold,
-    fontSize: typeScale.bodyMd,
-    color: colors.primary,
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelMd,
+    color: colors.white,
+    letterSpacing: 0.3,
   },
   rowMain: {
     flex: 1,
@@ -385,23 +424,25 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   rowName: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.bodyLg,
-    color: colors.onSurface,
+    fontFamily: fontFamily.bold,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.35),
+    color: colors.ink,
   },
-  rowSecondary: {
+  rowMeta: {
     fontFamily: fontFamily.medium,
     fontSize: typeScale.labelSm,
-    color: colors.onSurfaceVariant,
+    color: colors.meta,
   },
   rowNotes: {
-    marginTop: spacing.xs,
+    marginTop: 2,
     fontFamily: fontFamily.regular,
     fontSize: typeScale.labelMd,
     lineHeight: lineHeight(typeScale.labelMd, 1.45),
-    color: colors.onSurfaceVariant,
+    color: colors.meta,
+    fontStyle: 'italic',
   },
   pressed: {
-    opacity: 0.88,
+    opacity: 0.9,
   },
 });

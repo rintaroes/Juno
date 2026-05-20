@@ -1,43 +1,68 @@
 import '../lib/backgroundLocationTask';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Fraunces_400Regular } from '@expo-google-fonts/fraunces';
-import { Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
 import {
-  PlusJakartaSans_400Regular,
-  PlusJakartaSans_500Medium,
-  PlusJakartaSans_600SemiBold,
-  PlusJakartaSans_700Bold,
-  PlusJakartaSans_800ExtraBold,
-} from '@expo-google-fonts/plus-jakarta-sans';
+  JetBrainsMono_400Regular,
+  JetBrainsMono_500Medium,
+  JetBrainsMono_600SemiBold,
+} from '@expo-google-fonts/jetbrains-mono';
+import {
+  Manrope_400Regular,
+  Manrope_500Medium,
+  Manrope_600SemiBold,
+  Manrope_700Bold,
+  Manrope_800ExtraBold,
+} from '@expo-google-fonts/manrope';
+import {
+  Newsreader_400Regular,
+  Newsreader_400Regular_Italic,
+  Newsreader_500Medium,
+  Newsreader_500Medium_Italic,
+  Newsreader_600SemiBold,
+  Newsreader_600SemiBold_Italic,
+  Newsreader_700Bold,
+} from '@expo-google-fonts/newsreader';
 import { useFonts } from 'expo-font';
 import { Redirect, Stack, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppErrorState } from '../components/AppErrorState';
 import { AppLoading } from '../components/AppLoading';
 import { AuthProvider, useAuth } from '../providers/AuthProvider';
 import { ONBOARDING_COMPLETION_KEY } from '../stores/onboardingStore';
 
-SplashScreen.preventAutoHideAsync();
+void SplashScreen.preventAutoHideAsync().catch(() => {
+  /* Dev client / web or repeat calls — safe to ignore. */
+});
 
 export default function RootLayout() {
+  const splashHiddenRef = useRef(false);
   const [fontsLoaded, fontError] = useFonts({
-    PlusJakartaSans_400Regular,
-    PlusJakartaSans_500Medium,
-    PlusJakartaSans_600SemiBold,
-    PlusJakartaSans_700Bold,
-    PlusJakartaSans_800ExtraBold,
-    Fraunces_400Regular,
-    Inter_400Regular,
-    Inter_500Medium,
+    Manrope_400Regular,
+    Manrope_500Medium,
+    Manrope_600SemiBold,
+    Manrope_700Bold,
+    Manrope_800ExtraBold,
+    Newsreader_400Regular,
+    Newsreader_400Regular_Italic,
+    Newsreader_500Medium,
+    Newsreader_500Medium_Italic,
+    Newsreader_600SemiBold,
+    Newsreader_600SemiBold_Italic,
+    Newsreader_700Bold,
+    JetBrainsMono_400Regular,
+    JetBrainsMono_500Medium,
+    JetBrainsMono_600SemiBold,
   });
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
-    }
+    if (!fontsLoaded && !fontError) return;
+    if (splashHiddenRef.current) return;
+    splashHiddenRef.current = true;
+    void SplashScreen.hideAsync().catch(() => {
+      /* Already hidden, Strict Mode second pass, or no native splash (some dev setups). */
+    });
   }, [fontsLoaded, fontError]);
 
   if (!fontsLoaded) {

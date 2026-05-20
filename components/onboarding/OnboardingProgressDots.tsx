@@ -26,9 +26,9 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 999,
-    backgroundColor: colors.primaryFixed,
+    backgroundColor: colors.screenGradient0,
   },
   dotActive: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.cta,
   },
 });

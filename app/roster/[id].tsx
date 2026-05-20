@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Archive, ChevronLeft, Trash2 } from 'lucide-react-native';
+import { Archive, ChevronLeft, ImagePlus, Trash2 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Buffer } from 'buffer';
 import { useEffect, useMemo, useState } from 'react';
@@ -15,7 +15,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Button } from '../../components/ui/Button';
+import { ScreenGradient } from '../../components/ui/ScreenGradient';
 import { listChatUploads, type ChatUpload } from '../../lib/chatUploads';
 import {
   listRegistryChecksForRoster,
@@ -29,8 +32,10 @@ import {
   updateRosterPerson,
   type RosterPerson,
 } from '../../lib/roster';
+import { rosterAvatarColor, rosterInitials } from '../../lib/rosterPresentation';
 import { useAuth } from '../../providers/AuthProvider';
 import {
+  ambientCard,
   colors,
   containerMargin,
   fontFamily,
@@ -281,174 +286,200 @@ export default function RosterPersonScreen() {
     );
   };
 
+  const heroName = (form.displayName.trim() || person?.display_name || 'Roster entry').trim();
+  const heroKey = person?.id ?? '';
+
   return (
     <View style={styles.screen}>
+      <StatusBar style="dark" />
+      <ScreenGradient />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
       >
         <ScrollView
           keyboardShouldPersistTaps="handled"
+          style={styles.scroll}
           contentContainerStyle={[
             styles.content,
             {
-              paddingTop: insets.top + spacing.md,
-              paddingBottom: spacing.xl,
+              paddingTop: insets.top + spacing.sm,
+              paddingBottom: spacing.xl * 2,
               paddingHorizontal: containerMargin,
             },
           ]}
           showsVerticalScrollIndicator={false}
         >
-          <Pressable
-            onPress={() => {
-              router.back();
-            }}
-            style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
-          >
-            <ChevronLeft size={18} color={colors.onSurface} strokeWidth={2.4} />
-            <Text style={styles.backLabel}>Back</Text>
-          </Pressable>
+          <View style={styles.topBar}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+              onPress={() => {
+                router.back();
+              }}
+              style={({ pressed }) => [styles.backIconBtn, pressed && styles.pressed]}
+            >
+              <ChevronLeft size={24} color={colors.ink} strokeWidth={1.75} />
+            </Pressable>
+          </View>
 
           {loading ? (
-            <Text style={styles.metaText}>Loading...</Text>
+            <View style={styles.loadingBlock}>
+              <ActivityIndicator color={colors.cta} size="large" />
+              <Text style={styles.metaText}>Loading profile…</Text>
+            </View>
           ) : (
             <>
-              <View style={styles.header}>
-                <Text style={styles.title}>Person Profile</Text>
-                <Text style={styles.subtitle}>
-                  Edit this private profile, update notes, archive, or delete.
-                </Text>
-                <Text style={styles.metaText}>
-                  Source: {person?.source ?? 'manual'} {isArchived ? '• archived' : ''}
-                </Text>
-              </View>
-
-              <View style={styles.form}>
-                <Field label="Display name *">
-                  <TextInput
-                    value={form.displayName}
-                    onChangeText={(value) => {
-                      setForm((prev) => ({ ...prev, displayName: value }));
-                    }}
-                    placeholder="e.g. Alex Mercer"
-                    placeholderTextColor={colors.outline}
-                    style={styles.input}
-                  />
-                </Field>
-
-                <Field label="Estimated age">
-                  <TextInput
-                    value={form.estimatedAge}
-                    onChangeText={(value) => {
-                      setForm((prev) => ({ ...prev, estimatedAge: value }));
-                    }}
-                    keyboardType="number-pad"
-                    placeholder="e.g. 31"
-                    placeholderTextColor={colors.outline}
-                    style={styles.input}
-                  />
-                </Field>
-
-                <Field label="Date of birth (YYYY-MM-DD)">
-                  <TextInput
-                    value={form.dob}
-                    onChangeText={(value) => {
-                      setForm((prev) => ({ ...prev, dob: value }));
-                    }}
-                    placeholder="1995-05-14"
-                    placeholderTextColor={colors.outline}
-                    style={styles.input}
-                  />
-                </Field>
-
-                <View style={styles.inline}>
-                  <View style={styles.inlineCell}>
-                    <Field label="State">
-                      <TextInput
-                        value={form.stateValue}
-                        onChangeText={(value) => {
-                          setForm((prev) => ({ ...prev, stateValue: value }));
-                        }}
-                        autoCapitalize="characters"
-                        maxLength={2}
-                        placeholder="WA"
-                        placeholderTextColor={colors.outline}
-                        style={styles.input}
-                      />
-                    </Field>
-                  </View>
-                  <View style={styles.inlineCell}>
-                    <Field label="ZIP">
-                      <TextInput
-                        value={form.zip}
-                        onChangeText={(value) => {
-                          setForm((prev) => ({ ...prev, zip: value }));
-                        }}
-                        keyboardType="number-pad"
-                        placeholder="98101"
-                        placeholderTextColor={colors.outline}
-                        style={styles.input}
-                      />
-                    </Field>
-                  </View>
+              <View style={styles.hero}>
+                <View
+                  style={[
+                    styles.heroAvatar,
+                    { backgroundColor: rosterAvatarColor(heroKey) },
+                  ]}
+                >
+                  <Text style={styles.heroAvatarText}>{rosterInitials(heroName)}</Text>
                 </View>
-
-                <Field label="Notes">
-                  <TextInput
-                    value={form.notes}
-                    onChangeText={(value) => {
-                      setForm((prev) => ({ ...prev, notes: value }));
-                    }}
-                    multiline
-                    textAlignVertical="top"
-                    placeholder="Private notes"
-                    placeholderTextColor={colors.outline}
-                    style={[styles.input, styles.notesInput]}
-                  />
-                </Field>
+                <View style={styles.heroText}>
+                  <Text style={styles.heroName} numberOfLines={2}>
+                    {heroName}
+                  </Text>
+                  <Text style={styles.heroMeta}>
+                    {person?.source === 'manual' || !person?.source
+                      ? 'Added manually'
+                      : `Source: ${person.source}`}
+                    {isArchived ? ' · Archived' : ''}
+                  </Text>
+                  {isArchived ? (
+                    <View style={styles.archivedChip}>
+                      <Text style={styles.archivedChipLabel}>Archived</Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
 
-              <Pressable
+              <Text style={styles.lead}>
+                Private to you — update details, notes, and linked checks anytime.
+              </Text>
+
+              <View style={[styles.formCard, ambientCard]}>
+                <Text style={styles.cardTitle}>Details</Text>
+                <View style={styles.form}>
+                  <Field label="Display name *">
+                    <TextInput
+                      value={form.displayName}
+                      onChangeText={(value) => {
+                        setForm((prev) => ({ ...prev, displayName: value }));
+                      }}
+                      placeholder="e.g. Alex Mercer"
+                      placeholderTextColor={colors.meta}
+                      style={styles.input}
+                    />
+                  </Field>
+
+                  <Field label="Estimated age">
+                    <TextInput
+                      value={form.estimatedAge}
+                      onChangeText={(value) => {
+                        setForm((prev) => ({ ...prev, estimatedAge: value }));
+                      }}
+                      keyboardType="number-pad"
+                      placeholder="e.g. 31"
+                      placeholderTextColor={colors.meta}
+                      style={styles.input}
+                    />
+                  </Field>
+
+                  <Field label="Date of birth (YYYY-MM-DD)">
+                    <TextInput
+                      value={form.dob}
+                      onChangeText={(value) => {
+                        setForm((prev) => ({ ...prev, dob: value }));
+                      }}
+                      placeholder="1995-05-14"
+                      placeholderTextColor={colors.meta}
+                      style={styles.input}
+                    />
+                  </Field>
+
+                  <View style={styles.inline}>
+                    <View style={styles.inlineCell}>
+                      <Field label="State">
+                        <TextInput
+                          value={form.stateValue}
+                          onChangeText={(value) => {
+                            setForm((prev) => ({ ...prev, stateValue: value }));
+                          }}
+                          autoCapitalize="characters"
+                          maxLength={2}
+                          placeholder="WA"
+                          placeholderTextColor={colors.meta}
+                          style={styles.input}
+                        />
+                      </Field>
+                    </View>
+                    <View style={styles.inlineCell}>
+                      <Field label="ZIP">
+                        <TextInput
+                          value={form.zip}
+                          onChangeText={(value) => {
+                            setForm((prev) => ({ ...prev, zip: value }));
+                          }}
+                          keyboardType="number-pad"
+                          placeholder="98101"
+                          placeholderTextColor={colors.meta}
+                          style={styles.input}
+                        />
+                      </Field>
+                    </View>
+                  </View>
+
+                  <Field label="Notes">
+                    <TextInput
+                      value={form.notes}
+                      onChangeText={(value) => {
+                        setForm((prev) => ({ ...prev, notes: value }));
+                      }}
+                      multiline
+                      textAlignVertical="top"
+                      placeholder="Private notes — tone, boundaries, anything you want to remember."
+                      placeholderTextColor={colors.meta}
+                      style={[styles.input, styles.notesInput]}
+                    />
+                  </Field>
+                </View>
+              </View>
+
+              <Button
+                label="Save changes"
+                loading={saving}
                 disabled={!canSave || saving}
                 onPress={() => {
                   void onSave();
                 }}
-                style={({ pressed }) => [
-                  styles.saveBtn,
-                  (!canSave || saving) && styles.saveBtnDisabled,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={styles.saveLabel}>{saving ? 'Saving...' : 'Save changes'}</Text>
-              </Pressable>
+              />
 
-              <View style={styles.chatSection}>
-                <Text style={styles.chatSectionTitle}>Registry checks</Text>
-                <Text style={styles.chatSectionHint}>
+              <View style={[styles.sectionCard, ambientCard]}>
+                <Text style={styles.sectionTitle}>Registry checks</Text>
+                <Text style={styles.sectionHint}>
                   Linked lookups from Protect. Each registry result requires explicit confirmation
                   before it is attached here.
                 </Text>
-                <Pressable
-                  accessibilityRole="button"
+                <Button
+                  variant="outline"
+                  label="Run registry check"
                   onPress={() =>
                     router.push({
                       pathname: '/registry/lookup',
                       params: { rosterPersonId: id },
                     })
                   }
-                  style={({ pressed }) => [
-                    styles.chatUploadBtn,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={styles.chatUploadLabel}>Run registry check</Text>
-                </Pressable>
+                />
                 {registryChecks.length === 0 ? (
                   <Text style={styles.chatEmptyText}>No registry checks linked yet.</Text>
                 ) : (
                   <View style={styles.chatList}>
                     {registryChecks.map((c) => (
-                      <View key={c.id} style={styles.chatCard}>
+                      <View key={c.id} style={styles.embedCard}>
                         <Text style={styles.chatCardMeta}>
                           {new Date(c.created_at).toLocaleString()} ·{' '}
                           {c.status.replace(/_/g, ' ')}
@@ -470,38 +501,28 @@ export default function RosterPersonScreen() {
                 )}
               </View>
 
-              <View style={styles.chatSection}>
-                <Text style={styles.chatSectionTitle}>Chat Screenshot Summaries</Text>
-                <Text style={styles.chatSectionHint}>
+              <View style={[styles.sectionCard, ambientCard]}>
+                <Text style={styles.sectionTitle}>Chat screenshot summaries</Text>
+                <Text style={styles.sectionHint}>
                   Upload a dating app or iMessage screenshot to extract OCR and AI context.
                 </Text>
-                <Pressable
+                <Button
+                  variant="outline"
+                  label={uploadingChat ? 'Analyzing…' : 'Add chat screenshot'}
+                  icon={ImagePlus}
+                  loading={uploadingChat}
                   disabled={uploadingChat}
                   onPress={() => {
                     void onUploadChatScreenshot();
                   }}
-                  style={({ pressed }) => [
-                    styles.chatUploadBtn,
-                    uploadingChat && styles.saveBtnDisabled,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  {uploadingChat ? (
-                    <>
-                      <ActivityIndicator color={colors.onPrimary} />
-                      <Text style={styles.chatUploadLabel}>Analyzing screenshot...</Text>
-                    </>
-                  ) : (
-                    <Text style={styles.chatUploadLabel}>Add Chat Screenshot</Text>
-                  )}
-                </Pressable>
+                />
 
                 {chatUploads.length === 0 ? (
                   <Text style={styles.chatEmptyText}>No chat screenshots yet.</Text>
                 ) : (
                   <View style={styles.chatList}>
                     {chatUploads.map((entry) => (
-                      <View key={entry.id} style={styles.chatCard}>
+                      <View key={entry.id} style={styles.embedCard}>
                         <Text style={styles.chatCardMeta}>
                           {new Date(entry.created_at).toLocaleString()}
                         </Text>
@@ -521,27 +542,39 @@ export default function RosterPersonScreen() {
                 )}
               </View>
 
-              <View style={styles.secondaryActions}>
+              <View style={[styles.sectionCard, ambientCard]}>
+                <Text style={styles.sectionTitle}>Roster actions</Text>
+                <Text style={styles.sectionHint}>
+                  Archive hides this person from your active list. Delete removes the profile
+                  permanently.
+                </Text>
                 <Pressable
                   onPress={onToggleArchive}
-                  style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
-                >
-                  <Archive size={16} color={colors.onSurface} strokeWidth={2.2} />
-                  <Text style={styles.secondaryLabel}>
-                    {isArchived ? 'Restore from archive' : 'Archive person'}
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={onDelete}
+                  disabled={saving}
                   style={({ pressed }) => [
-                    styles.secondaryBtn,
-                    styles.deleteBtn,
+                    styles.actionRow,
+                    saving && styles.actionRowDisabled,
                     pressed && styles.pressed,
                   ]}
                 >
-                  <Trash2 size={16} color={colors.error} strokeWidth={2.2} />
-                  <Text style={styles.deleteLabel}>Delete person</Text>
+                  <Archive size={18} color={colors.ink} strokeWidth={2} />
+                  <Text style={styles.actionRowLabel}>
+                    {isArchived ? 'Restore from archive' : 'Archive person'}
+                  </Text>
+                </Pressable>
+                <View style={styles.actionDivider} />
+                <Pressable
+                  onPress={onDelete}
+                  disabled={saving}
+                  style={({ pressed }) => [
+                    styles.actionRow,
+                    styles.actionRowDanger,
+                    saving && styles.actionRowDisabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Trash2 size={18} color={colors.alert} strokeWidth={2} />
+                  <Text style={styles.actionRowLabelDanger}>Delete person</Text>
                 </Pressable>
               </View>
             </>
@@ -581,74 +614,132 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.paper,
   },
   flex: {
     flex: 1,
   },
-  content: {
-    gap: spacing.md,
+  scroll: {
+    flex: 1,
+    zIndex: 1,
   },
-  backBtn: {
+  content: {
+    gap: spacing.lg,
+  },
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  backIconBtn: {
+    width: 44,
+    height: 44,
+    marginLeft: -10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingBlock: {
+    paddingVertical: spacing.xl * 2,
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  hero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  heroAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroAvatarText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.headlineMd,
+    color: colors.white,
+    letterSpacing: 0.5,
+  },
+  heroText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  heroName: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: typeScale.headlineMd,
+    lineHeight: lineHeight(typeScale.headlineMd, 1.15),
+    color: colors.ink,
+    letterSpacing: -0.3,
+  },
+  heroMeta: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelMd,
+    color: colors.meta,
+  },
+  archivedChip: {
     alignSelf: 'flex-start',
-    gap: 2,
-    borderRadius: radii.full,
+    marginTop: 4,
     paddingHorizontal: 10,
-    paddingVertical: 7,
-    backgroundColor: colors.surfaceContainerLowest,
+    paddingVertical: 4,
+    borderRadius: radii.full,
+    backgroundColor: colors.surfaceSecondary,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
   },
-  backLabel: {
-    fontFamily: fontFamily.medium,
-    fontSize: typeScale.labelMd,
-    color: colors.onSurface,
-  },
-  header: {
-    gap: spacing.xs,
-  },
-  title: {
-    fontFamily: fontFamily.bold,
-    fontSize: typeScale.headlineMd,
-    color: colors.primary,
-  },
-  subtitle: {
-    fontFamily: fontFamily.regular,
-    fontSize: typeScale.labelMd,
-    lineHeight: lineHeight(typeScale.labelMd, 1.45),
-    color: colors.onSurfaceVariant,
-  },
-  metaText: {
-    fontFamily: fontFamily.medium,
+  archivedChipLabel: {
+    fontFamily: fontFamily.semiBold,
     fontSize: typeScale.labelSm,
-    color: colors.tertiary,
+    color: colors.meta,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  lead: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.5),
+    color: colors.meta,
+    marginTop: spacing.xs,
+  },
+  formCard: {
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  cardTitle: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: typeScale.titleLg,
+    color: colors.ink,
+    letterSpacing: -0.2,
   },
   form: {
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   field: {
     gap: 6,
   },
   label: {
     fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelMd,
-    color: colors.onSurfaceVariant,
+    fontSize: typeScale.labelSm,
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
+    color: colors.meta,
   },
   input: {
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
-    backgroundColor: colors.surfaceContainerLowest,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
+    backgroundColor: colors.paper,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontFamily: fontFamily.regular,
     fontSize: typeScale.bodyMd,
-    color: colors.onSurface,
+    color: colors.ink,
   },
   notesInput: {
-    minHeight: 116,
+    minHeight: 120,
   },
   inline: {
     flexDirection: 'row',
@@ -657,128 +748,115 @@ const styles = StyleSheet.create({
   inlineCell: {
     flex: 1,
   },
-  saveBtn: {
-    marginTop: spacing.sm,
-    borderRadius: radii.full,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    paddingVertical: 13,
+  metaText: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelMd,
+    color: colors.meta,
   },
-  saveBtnDisabled: {
-    opacity: 0.5,
+  sectionCard: {
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
+    padding: spacing.lg,
+    gap: spacing.sm,
   },
-  saveLabel: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.bodyLg,
-    color: colors.onPrimary,
+  sectionTitle: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: typeScale.titleLg,
+    color: colors.ink,
+    letterSpacing: -0.2,
   },
-  chatSection: {
-    marginTop: spacing.md,
-    gap: spacing.xs,
-  },
-  chatSectionTitle: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.bodyLg,
-    color: colors.onSurface,
-  },
-  chatSectionHint: {
+  sectionHint: {
     fontFamily: fontFamily.regular,
     fontSize: typeScale.labelMd,
     lineHeight: lineHeight(typeScale.labelMd, 1.45),
-    color: colors.onSurfaceVariant,
-  },
-  chatUploadBtn: {
-    marginTop: spacing.xs,
-    borderRadius: radii.full,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    flexDirection: 'row',
-    paddingVertical: 12,
-  },
-  chatUploadLabel: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelMd,
-    color: colors.onPrimary,
+    color: colors.meta,
   },
   chatEmptyText: {
     marginTop: spacing.xs,
     fontFamily: fontFamily.regular,
-    color: colors.onSurfaceVariant,
+    fontSize: typeScale.labelMd,
+    color: colors.meta,
   },
   chatList: {
     marginTop: spacing.xs,
     gap: spacing.sm,
   },
-  chatCard: {
+  embedCard: {
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
-    backgroundColor: colors.surfaceContainerLowest,
-    padding: spacing.sm,
-    gap: 4,
+    backgroundColor: colors.paper,
+    padding: spacing.md,
+    gap: 6,
   },
   chatCardMeta: {
     fontFamily: fontFamily.medium,
     fontSize: typeScale.labelSm,
-    color: colors.tertiary,
+    color: colors.meta,
   },
   chatOpeningLine: {
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.labelMd,
-    color: colors.onSurface,
+    color: colors.ink,
   },
   chatSummaryText: {
     fontFamily: fontFamily.regular,
     fontSize: typeScale.labelMd,
     lineHeight: lineHeight(typeScale.labelMd, 1.45),
-    color: colors.onSurfaceVariant,
+    color: colors.inkBody,
   },
   flagBlock: {
     marginTop: 4,
     gap: 2,
   },
   flagTitle: {
-    fontFamily: fontFamily.medium,
+    fontFamily: fontFamily.semiBold,
     fontSize: typeScale.labelSm,
-    color: colors.onSurface,
+    color: colors.ink,
   },
   flagEmpty: {
     fontFamily: fontFamily.regular,
     fontSize: typeScale.labelSm,
-    color: colors.onSurfaceVariant,
+    color: colors.meta,
   },
   flagRow: {
     fontFamily: fontFamily.regular,
     fontSize: typeScale.labelSm,
-    color: colors.onSurfaceVariant,
+    lineHeight: lineHeight(typeScale.labelSm, 1.4),
+    color: colors.meta,
   },
-  secondaryActions: {
-    gap: spacing.xs,
-  },
-  secondaryBtn: {
+  actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    borderRadius: radii.full,
+    gap: spacing.sm,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
-    backgroundColor: colors.surfaceContainerLowest,
-    paddingVertical: 11,
+    backgroundColor: colors.paper,
   },
-  secondaryLabel: {
-    fontFamily: fontFamily.medium,
-    color: colors.onSurface,
+  actionRowDanger: {
+    borderColor: 'rgba(176, 84, 72, 0.35)',
+    backgroundColor: colors.riskAttentionBg,
   },
-  deleteBtn: {
-    borderColor: colors.errorContainer,
-    backgroundColor: colors.errorContainer,
+  actionRowDisabled: {
+    opacity: 0.45,
   },
-  deleteLabel: {
-    fontFamily: fontFamily.medium,
-    color: colors.error,
+  actionRowLabel: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    color: colors.ink,
+  },
+  actionRowLabelDanger: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    color: colors.alert,
+  },
+  actionDivider: {
+    height: 1,
+    backgroundColor: colors.outlineVariant,
+    marginVertical: 2,
   },
   pressed: {
     opacity: 0.88,

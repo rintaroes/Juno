@@ -1,16 +1,16 @@
-import {
-  BookUser,
-  MapPinned,
-  Shield,
-  UsersRound,
-} from 'lucide-react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  DockCirclesIcon,
+  DockMapIcon,
+  DockProtectIcon,
+  DockRosterIcon,
+} from './dock/DockIcons';
+import {
   colors,
-  dockPaddingBottom,
   dockPaddingTop,
+  dockTabBlockHeight,
   fontFamily,
   spacing,
   typeScale,
@@ -19,17 +19,26 @@ import { radii } from '../theme/radii';
 
 export type DockTabId = 'protect' | 'roster' | 'map' | 'circles';
 
-const TABS: {
+const ACTIVE = colors.cta;
+const INACTIVE = colors.meta;
+
+type TabConfig = {
   id: DockTabId;
   label: string;
   href: '/map' | '/protect' | '/roster' | '/circles';
-  icon: typeof Shield;
-}[] = [
-  { id: 'map', label: 'Map', href: '/map', icon: MapPinned },
-  { id: 'protect', label: 'Protect', href: '/protect', icon: Shield },
-  { id: 'roster', label: 'Roster', href: '/roster', icon: BookUser },
-  { id: 'circles', label: 'Circles', href: '/circles', icon: UsersRound },
+  Icon: typeof DockMapIcon;
+};
+
+const TABS: TabConfig[] = [
+  { id: 'map', label: 'Map', href: '/map', Icon: DockMapIcon },
+  { id: 'protect', label: 'Protect', href: '/protect', Icon: DockProtectIcon },
+  { id: 'roster', label: 'Roster', href: '/roster', Icon: DockRosterIcon },
+  { id: 'circles', label: 'Circles', href: '/circles', Icon: DockCirclesIcon },
 ];
+
+const ICON_SIZE = 24;
+const INDICATOR_WIDTH = 28;
+const INDICATOR_HEIGHT = 3;
 
 export function AppDock({
   variant = 'default',
@@ -48,27 +57,27 @@ export function AppDock({
         ? 'circles'
         : pathname.includes('/protect') || pathname.startsWith('/registry')
           ? 'protect'
-      : 'protect';
-  const bottom = Math.max(insets.bottom, 8);
+          : 'protect';
+
+  const isFloating = variant === 'floating';
+  const bottomInset = isFloating ? insets.bottom + spacing.sm : insets.bottom;
 
   return (
     <View
       style={[
         styles.dock,
-        variant === 'floating'
-          ? styles.dockFloating
-          : variant === 'connected'
-            ? styles.dockConnected
-            : styles.dockDefault,
+        isFloating ? styles.dockFloating : styles.dockDefault,
         {
           paddingTop: dockPaddingTop,
-          paddingBottom: dockPaddingBottom + bottom,
+          paddingBottom: bottomInset,
         },
       ]}
     >
       {TABS.map((tab) => {
         const isActive = tab.id === active;
-        const Icon = tab.icon;
+        const tint = isActive ? ACTIVE : INACTIVE;
+        const strokeWidth = isActive ? 2.25 : 2;
+        const { Icon } = tab;
         return (
           <Pressable
             key={tab.id}
@@ -77,23 +86,18 @@ export function AppDock({
             onPress={() => {
               router.replace(tab.href);
             }}
-            style={({ pressed }) => [
-              styles.dockItem,
-              isActive && styles.dockItemActive,
-              pressed && styles.pressed,
-            ]}
+            style={({ pressed }) => [styles.dockItem, pressed && styles.pressed]}
           >
-            <Icon
-              color={isActive ? colors.indigo600 : colors.slate400}
-              size={22}
-              strokeWidth={2}
-            />
+            <Icon color={tint} size={ICON_SIZE} strokeWidth={strokeWidth} />
             <Text
               style={[styles.dockLabel, isActive && styles.dockLabelActive]}
               numberOfLines={1}
             >
               {tab.label}
             </Text>
+            <View style={styles.indicatorSlot}>
+              {isActive ? <View style={styles.indicator} /> : null}
+            </View>
           </Pressable>
         );
       })}
@@ -109,9 +113,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'flex-start',
-    paddingHorizontal: 16,
-    backgroundColor: colors.white,
-    borderTopWidth: 0,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.card,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.ghostBorder,
   },
   dockDefault: {
     left: 0,
@@ -122,40 +127,40 @@ const styles = StyleSheet.create({
   dockFloating: {
     left: spacing.sm,
     right: spacing.sm,
-    bottom: spacing.md,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: '#f8fafc',
-  },
-  dockConnected: {
-    left: 0,
-    right: 0,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
+    borderColor: colors.ghostBorder,
+    borderTopWidth: 1,
   },
   dockItem: {
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: radii.full,
+    justifyContent: 'flex-start',
+    minHeight: dockTabBlockHeight,
+    paddingHorizontal: 6,
     minWidth: 0,
     flex: 1,
-    maxWidth: 100,
-  },
-  dockItemActive: {
-    backgroundColor: colors.indigo50,
   },
   dockLabel: {
-    marginTop: 4,
+    marginTop: 6,
     fontFamily: fontFamily.medium,
     fontSize: typeScale.dockLabel,
-    color: colors.slate400,
+    color: INACTIVE,
   },
   dockLabelActive: {
-    color: colors.indigo600,
+    fontFamily: fontFamily.semiBold,
+    color: ACTIVE,
+  },
+  indicatorSlot: {
+    height: INDICATOR_HEIGHT + 4,
+    marginTop: 4,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  indicator: {
+    width: INDICATOR_WIDTH,
+    height: INDICATOR_HEIGHT,
+    borderRadius: radii.full,
+    backgroundColor: ACTIVE,
   },
   pressed: {
     opacity: 0.88,

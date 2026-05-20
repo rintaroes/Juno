@@ -1,16 +1,22 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import {
+  AlertTriangle,
   CalendarClock,
   ChevronLeft,
+  Clock,
+  Coffee,
   Footprints,
   Heart,
   Home,
   MapPin,
+  Moon,
   ShieldCheck,
-  Siren,
+  UtensilsCrossed,
   X,
+  type LucideIcon,
 } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -39,6 +45,8 @@ import MapView, { Marker, PROVIDER_GOOGLE, type Region } from 'react-native-maps
 import type { MapPressEvent } from 'react-native-maps/lib/MapView.types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppDock } from '../components/AppDock';
+import { Button } from '../components/ui/Button';
+import { ScreenGradient } from '../components/ui/ScreenGradient';
 import {
   endDateSession,
   getMyActiveDateSession,
@@ -259,13 +267,63 @@ function regionForFriendFocus(latitude: number, longitude: number): Region {
 const DATE_DURATION_OPTIONS: { id: string; label: string; subtitle: string; minutes: number }[] = [
   { id: '1h', label: '1 hour', subtitle: 'Quick coffee, quick vibe check.', minutes: 60 },
   { id: '2h', label: '2 hours', subtitle: 'Dinner and a good convo.', minutes: 120 },
-  { id: '4h', label: '4 hours', subtitle: 'A full evening out.', minutes: 240 },
-  { id: '12h', label: 'Whole night', subtitle: 'If sparks fly, call it 12 hours.', minutes: 720 },
+  { id: '12h', label: 'Whole night', subtitle: 'A full evening out.', minutes: 720 },
 ];
+
+const DURATION_OPTION_ICONS: Record<string, LucideIcon> = {
+  '1h': Coffee,
+  '2h': UtensilsCrossed,
+  '12h': Moon,
+};
+
+const COMPANION_AVATAR_PALETTE = [
+  '#C4A574',
+  '#C17F59',
+  '#6B7B8C',
+  '#9B7B9C',
+  '#5C8F7A',
+  '#C97B84',
+  '#8B7355',
+  '#7A6B8E',
+] as const;
+
+function companionInitials(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0].charAt(0)}${parts[1].charAt(0)}`.toUpperCase();
+  }
+  const t = displayName.trim();
+  if (t.length >= 2) return t.slice(0, 2).toUpperCase();
+  return t ? `${t.charAt(0)}?`.toUpperCase() : '??';
+}
+
+function companionAvatarColor(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    h = (h * 31 + seed.charCodeAt(i)) | 0;
+  }
+  return COMPANION_AVATAR_PALETTE[Math.abs(h) % COMPANION_AVATAR_PALETTE.length];
+}
+
+function DatePlanProgressBar({ activeStep }: { activeStep: 1 | 2 | 3 }) {
+  return (
+    <View style={styles.datePlanProgressRow}>
+      {([1, 2, 3] as const).map((s) => (
+        <View
+          key={s}
+          style={[styles.datePlanProgressSeg, s === activeStep && styles.datePlanProgressSegActive]}
+        />
+      ))}
+    </View>
+  );
+}
+
 const CUSTOM_HOUR_MAX = 23;
 const CUSTOM_MINUTE_MAX = 59;
 const WHEEL_ROW_HEIGHT = 44;
 const WHEEL_VISIBLE_ROWS = 5;
+/** Closer to 1 = longer glide / more “slippery” wheel (iOS + Android). */
+const WHEEL_DECELERATION_RATE = 0.9992;
 
 function displayName(s: FriendMapSnapshot) {
   return s.first_name?.trim() || (s.username ? `@${s.username}` : 'Friend');
@@ -318,6 +376,12 @@ function timerLine(
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} remaining`;
   }
   return `${minutes}:${String(seconds).padStart(2, '0')} remaining`;
+}
+
+/** Strip trailing " remaining" from {@link timerLine} for compact UI (e.g. date mode card). */
+function countdownDigits(line: string | null): string {
+  if (line == null) return '—';
+  return line.replace(/\s*remaining\s*$/i, '');
 }
 
 type PinModel = {
@@ -1096,11 +1160,22 @@ export default function MapScreen() {
     if (h > 0) return `${h}h`;
     return `${m}m`;
   }, [timerChoice]);
-  const customDurationLabel = useMemo(() => {
+
+  /** Review step copy: "2 hrs", "1 hr 30 min", etc. */
+  const reviewDurationFriendly = useMemo(() => {
+    const h = Math.floor(timerChoice / 60);
+    const m = timerChoice % 60;
+    if (h > 0 && m === 0) return h === 1 ? '1 hr' : `${h} hrs`;
+    if (h > 0 && m > 0) return `${h === 1 ? '1 hr' : `${h} hrs`} ${m} min`;
+    return `${m} min`;
+  }, [timerChoice]);
+
+  /** "4hr 30m" style for custom picker preview line */
+  const customDurationPreviewText = useMemo(() => {
     const h = customHours;
     const m = customMinutes;
-    if (h > 0 && m > 0) return `${h}h ${m}m`;
-    if (h > 0) return `${h}h`;
+    if (h > 0 && m > 0) return `${h}hr ${m}m`;
+    if (h > 0) return `${h}hr`;
     return `${m}m`;
   }, [customHours, customMinutes]);
 
@@ -1172,6 +1247,18 @@ export default function MapScreen() {
     },
     [],
   );
+
+  const onHourWheelScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const idx = Math.max(0, Math.min(CUSTOM_HOUR_MAX, Math.round(y / WHEEL_ROW_HEIGHT)));
+    setCustomHours((prev) => (prev === idx ? prev : idx));
+  }, []);
+
+  const onMinuteWheelScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const idx = Math.max(0, Math.min(CUSTOM_MINUTE_MAX, Math.round(y / WHEEL_ROW_HEIGHT)));
+    setCustomMinutes((prev) => (prev === idx ? prev : idx));
+  }, []);
 
   const onStartDate = useCallback(async () => {
     if (!user?.id || !selectedRosterId) {
@@ -1340,7 +1427,10 @@ export default function MapScreen() {
     detailSelf && myCoords ? myCoords.latitude : (detailFriend?.lat ?? null);
   const sheetDetailLng =
     detailSelf && myCoords ? myCoords.longitude : (detailFriend?.lng ?? null);
-  const activeDateCountdown = timerLine(mySession?.started_at ?? null, mySession?.timer_minutes ?? null, Date.now());
+  const activeDateCountdown = useMemo(
+    () => timerLine(mySession?.started_at ?? null, mySession?.timer_minutes ?? null, Date.now()),
+    [mySession?.started_at, mySession?.timer_minutes, tick],
+  );
 
   return (
     <View style={styles.screen}>
@@ -1401,8 +1491,7 @@ export default function MapScreen() {
           accessibilityLabel="Date mode"
           onPress={openDateModal}
           style={({ pressed }) => [
-            styles.dateFab,
-            mySession?.status === 'active' && styles.dateFabActive,
+            styles.dateFabHit,
             {
               top: insets.top + (locPerm === 'denied' || mapLoadError ? 72 : spacing.sm),
               right: containerMargin,
@@ -1410,19 +1499,32 @@ export default function MapScreen() {
             pressed && styles.pressed,
           ]}
         >
-          <Heart
-            color={mySession?.status === 'active' ? colors.onErrorContainer : colors.onSecondaryContainer}
-            size={20}
-            strokeWidth={2}
-          />
-          <View>
-            <Text style={[styles.dateFabLabel, mySession?.status === 'active' && styles.dateFabLabelActive]}>
-              {mySession?.status === 'active' ? 'On date' : 'Date mode'}
-            </Text>
-            {mySession?.status === 'active' && activeDateCountdown ? (
-              <Text style={styles.dateFabTimer}>{activeDateCountdown.replace(' remaining', '')}</Text>
-            ) : null}
-          </View>
+          <LinearGradient
+            colors={[colors.sageGradientStart, colors.sageGradientEnd]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[
+              styles.dateFab,
+              mySession?.status === 'active' && styles.dateFabActive,
+            ]}
+          >
+            <Heart
+              color={colors.ctaGradientStart}
+              fill={colors.ctaGradientStart}
+              size={20}
+              strokeWidth={2}
+            />
+            <View>
+              <Text style={styles.dateFabLabel}>
+                {mySession?.status === 'active' ? 'On date' : 'Date mode'}
+              </Text>
+              {mySession?.status === 'active' && activeDateCountdown ? (
+                <Text style={styles.dateFabTimer}>
+                  {activeDateCountdown.replace(' remaining', '')}
+                </Text>
+              ) : null}
+            </View>
+          </LinearGradient>
         </Pressable>
 
         <Animated.View
@@ -1677,241 +1779,369 @@ export default function MapScreen() {
       </View>
 
       <Modal visible={dateModalOpen} animationType="slide" onRequestClose={onCloseDateModal}>
-        <View style={[styles.dateModalScreen, { paddingTop: insets.top + spacing.md }]}>
-          <View style={styles.dateModalHeader}>
-            {mySession?.status === 'active' ? null : (
-              <Pressable
-                disabled={dateSetupStep === 1}
-                onPress={() => toStep((Math.max(1, dateSetupStep - 1) as 1 | 2 | 3))}
-                style={({ pressed }) => [
-                  styles.backPill,
-                  dateSetupStep === 1 && styles.backPillDisabled,
-                  pressed && styles.pressed,
-                ]}
+        <View style={styles.datePlanScreen}>
+          <ScreenGradient />
+
+          {mySession?.status === 'active' ? (
+            <>
+              <View style={[styles.datePlanHeader, { paddingTop: insets.top + spacing.sm }]}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Go back"
+                  onPress={onCloseDateModal}
+                  style={({ pressed }) => [styles.datePlanHeaderBtn, pressed && styles.pressed]}
+                >
+                  <ChevronLeft color={colors.ink} size={24} strokeWidth={1.75} />
+                </Pressable>
+                <Text style={styles.datePlanNavTitle}>Date mode</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  onPress={onCloseDateModal}
+                  style={({ pressed }) => [styles.datePlanHeaderBtn, pressed && styles.pressed]}
+                >
+                  <X color={colors.ink} size={24} strokeWidth={2} />
+                </Pressable>
+              </View>
+              <ScrollView
+                style={styles.datePlanScrollView}
+                contentContainerStyle={styles.datePlanScroll}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
               >
-                <Text style={styles.backPillLabel}>Back</Text>
-              </Pressable>
-            )}
-            <Text style={styles.dateModalTitle}>
-              {mySession?.status === 'active'
-                ? 'Date mode'
-                : dateSetupStep === 1
-                  ? 'Plan your date'
-                  : dateSetupStep === 2
-                    ? 'Choose companion'
-                    : 'Ready to start'}
-            </Text>
-            <Pressable onPress={onCloseDateModal} style={({ pressed }) => [pressed && styles.pressed]}>
-              <X color={colors.onSurface} size={26} strokeWidth={2} />
-            </Pressable>
-          </View>
-          <ScrollView
-            contentContainerStyle={styles.dateModalScroll}
-            keyboardShouldPersistTaps="handled"
-          >
-            {mySession?.status === 'active' ? (
-              <>
-                <Text style={styles.sectionLabel}>Active date</Text>
-                <View style={styles.activeCard}>
-                  <Text style={styles.activeWith}>
-                    With {mySession.companion_display_name}
-                  </Text>
-                  {mySession.started_at ? (
-                    <Text style={styles.modalHint}>
-                      Started {formatSessionClock(mySession.started_at)}
-                    </Text>
-                  ) : null}
+                <Text style={styles.dateActivePillLabel}>Active date</Text>
+                <View style={styles.dateActiveCard}>
+                  <View style={styles.dateActiveCardTop}>
+                    <View
+                      style={[
+                        styles.dateActiveAvatar,
+                        { backgroundColor: companionAvatarColor(mySession.roster_person_id) },
+                      ]}
+                    >
+                      <Text style={styles.dateActiveAvatarText}>
+                        {companionInitials(mySession.companion_display_name)}
+                      </Text>
+                    </View>
+                    <View style={styles.dateActiveCardTopText}>
+                      <Text style={styles.dateActiveCompanionName} numberOfLines={1}>
+                        {mySession.companion_display_name}
+                      </Text>
+                      {mySession.started_at ? (
+                        <Text style={styles.dateActiveStarted}>
+                          Started: {formatSessionClock(mySession.started_at) ?? '—'}
+                        </Text>
+                      ) : null}
+                    </View>
+                  </View>
                   {mySession.timer_minutes ? (
-                    <View style={styles.timerLineRow}>
-                      <CalendarClock size={16} color={colors.tertiary} />
-                      <Text style={styles.modalMeta}>
-                        {timerLine(mySession.started_at, mySession.timer_minutes, Date.now())}
+                    <View style={styles.dateActiveTimerBand}>
+                      <View style={styles.dateActiveTimerLeft}>
+                        <ShieldCheck size={18} color={colors.riskLowInk} strokeWidth={2} />
+                        <Text style={styles.dateActiveTimerLabel}>Remaining time</Text>
+                      </View>
+                      <Text style={styles.dateActiveTimerValue}>
+                        {countdownDigits(activeDateCountdown)}
                       </Text>
                     </View>
                   ) : null}
-                  {mySession.companion_ai_summary ? (
-                    <View style={[styles.summaryBlock, { marginTop: spacing.sm }]}>
-                      <Text style={styles.summaryLabel}>Roster snapshot</Text>
-                      <Text style={styles.summaryText}>{mySession.companion_ai_summary}</Text>
-                    </View>
-                  ) : null}
                 </View>
-                <View style={styles.safetyRow}>
+                <View style={styles.dateActiveSafetyStack}>
                   <Pressable
                     onPress={() => onTapSafety('im_safe')}
                     disabled={safetySignalLoading || dateActionLoading}
                     style={({ pressed }) => [
-                      styles.safeBtn,
+                      styles.dateActiveSafeBtn,
                       pressed && styles.pressed,
                       (safetySignalLoading || dateActionLoading) && styles.disabledBtn,
                     ]}
                   >
-                    <ShieldCheck size={18} color={colors.primary} strokeWidth={2} />
-                    <Text style={styles.safeBtnText}>I'm safe</Text>
+                    <ShieldCheck size={20} color={colors.white} strokeWidth={2} />
+                    <Text style={styles.dateActiveSafeBtnText}>I&apos;m safe</Text>
                   </Pressable>
                   <Pressable
                     onPress={() => onTapSafety('alert_circle')}
                     disabled={safetySignalLoading || dateActionLoading}
                     style={({ pressed }) => [
-                      styles.alertBtn,
+                      styles.dateActiveAlertBtn,
                       pressed && styles.pressed,
                       (safetySignalLoading || dateActionLoading) && styles.disabledBtn,
                     ]}
                   >
-                    <Siren size={18} color={colors.onErrorContainer} strokeWidth={2} />
-                    <Text style={styles.alertBtnText}>Alert circle</Text>
+                    <AlertTriangle size={20} color={colors.white} strokeWidth={2} />
+                    <Text style={styles.dateActiveAlertBtnText}>Alert circle</Text>
                   </Pressable>
                 </View>
-                <Pressable
-                  onPress={onEndDate}
+              </ScrollView>
+              <View
+                style={[styles.datePlanFooter, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}
+              >
+                <Button
+                  label="End date"
+                  loading={dateActionLoading}
                   disabled={dateActionLoading}
-                  style={({ pressed }) => [
-                    styles.endBtn,
-                    pressed && styles.pressed,
-                    dateActionLoading && styles.disabledBtn,
-                  ]}
+                  onPress={() => {
+                    void onEndDate();
+                  }}
+                />
+              </View>
+            </>
+          ) : dateSetupStep === 1 ? (
+            <>
+              <View style={[styles.datePlanHeader, { paddingTop: insets.top + spacing.sm }]}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Go back"
+                  onPress={onCloseDateModal}
+                  style={({ pressed }) => [styles.datePlanHeaderBtn, pressed && styles.pressed]}
                 >
-                  {dateActionLoading ? (
-                    <ActivityIndicator color={colors.onPrimary} />
-                  ) : (
-                    <Text style={styles.endBtnText}>End date</Text>
-                  )}
+                  <ChevronLeft color={colors.ink} size={24} strokeWidth={1.75} />
                 </Pressable>
-              </>
-            ) : (
-              <>
-                {dateSetupStep === 1 ? (
-                  <>
-                    <Text style={styles.stepLead}>
-                      Great, you are going on a date. How long do you plan to spend with your new
-                      flame?
-                    </Text>
-                    <View style={styles.durationList}>
-                      {DATE_DURATION_OPTIONS.map((opt) => {
-                        const on = durationChoiceId === opt.id;
-                        return (
-                          <Pressable
-                            key={opt.id}
-                            onPress={() => applyPresetDuration(opt.id, opt.minutes)}
-                            style={[styles.durationCard, on && styles.durationCardOn]}
-                          >
-                            <Text style={styles.durationLabel}>{opt.label}</Text>
-                            <Text style={styles.durationSub}>{opt.subtitle}</Text>
-                          </Pressable>
-                        );
-                      })}
+                <Text style={styles.datePlanNavTitle}>Select time</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  onPress={onCloseDateModal}
+                  style={({ pressed }) => [styles.datePlanHeaderBtn, pressed && styles.pressed]}
+                >
+                  <X color={colors.ink} size={24} strokeWidth={2} />
+                </Pressable>
+              </View>
+              <DatePlanProgressBar activeStep={1} />
+              <ScrollView
+                style={styles.datePlanScrollView}
+                contentContainerStyle={styles.datePlanScroll}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={styles.datePlanHeadline}>
+                  Plan your <Text style={styles.datePlanHeadlineAccent}>date</Text>
+                </Text>
+                <Text style={styles.datePlanLead}>
+                  Great, you are going on a date. How long do you plan to spend with your new flame?
+                </Text>
+                <View style={styles.datePlanDurationList}>
+                  {DATE_DURATION_OPTIONS.map((opt) => {
+                    const on = durationChoiceId === opt.id;
+                    const Icon = DURATION_OPTION_ICONS[opt.id] ?? Clock;
+                    return (
                       <Pressable
-                        onPress={openCustomPicker}
-                        style={[
-                          styles.durationCard,
-                          durationChoiceId === 'custom' && styles.durationCardOn,
+                        key={opt.id}
+                        onPress={() => applyPresetDuration(opt.id, opt.minutes)}
+                        style={({ pressed }) => [
+                          styles.datePlanDurationCard,
+                          on && styles.datePlanDurationCardOn,
+                          pressed && styles.pressed,
                         ]}
                       >
-                        <Text style={styles.durationLabel}>Custom</Text>
-                        <Text style={styles.durationSub}>
-                          {durationChoiceId === 'custom'
-                            ? `Selected: ${selectedDurationLabel}`
-                            : 'Spin hours and minutes like the clock app.'}
-                        </Text>
+                        <View style={styles.datePlanIconWell}>
+                          <Icon color={colors.cta} size={22} strokeWidth={2} />
+                        </View>
+                        <View style={styles.datePlanDurationText}>
+                          <Text style={styles.datePlanDurationLabel}>{opt.label}</Text>
+                          <Text style={styles.datePlanDurationSub}>{opt.subtitle}</Text>
+                        </View>
                       </Pressable>
+                    );
+                  })}
+                  <Pressable
+                    onPress={openCustomPicker}
+                    style={({ pressed }) => [
+                      styles.datePlanDurationCard,
+                      durationChoiceId === 'custom' && styles.datePlanDurationCardOn,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <View style={styles.datePlanIconWell}>
+                      <Clock color={colors.cta} size={22} strokeWidth={2} />
                     </View>
-                    <Pressable
-                      onPress={() => toStep(2)}
-                      disabled={!durationChoiceId}
-                      style={({ pressed }) => [
-                        styles.startBtn,
-                        pressed && styles.pressed,
-                        !durationChoiceId && styles.disabledBtn,
-                      ]}
-                    >
-                      <Text style={styles.startBtnText}>Next</Text>
-                    </Pressable>
-                  </>
-                ) : null}
-
-                {dateSetupStep === 2 ? (
-                  <>
-                    <Text style={styles.sectionLabel}>Who are you meeting?</Text>
-                    {rosterLoading ? (
-                      <ActivityIndicator style={{ marginVertical: 24 }} />
-                    ) : roster.length === 0 ? (
-                      <Text style={styles.emptyText}>
-                        Add someone to your roster first, then you can start date mode.
+                    <View style={styles.datePlanDurationText}>
+                      <Text style={styles.datePlanDurationLabel}>Custom</Text>
+                      <Text style={styles.datePlanDurationSub}>
+                        {durationChoiceId === 'custom'
+                          ? `Selected: ${selectedDurationLabel}`
+                          : 'Add custom hours and minutes.'}
                       </Text>
-                    ) : (
-                      <>
-                        {roster.map((item) => {
-                          const sel = selectedRosterId === item.id;
-                          return (
-                            <Pressable
-                              key={item.id}
-                              onPress={() => setSelectedRosterId(item.id)}
-                              style={[styles.rosterPick, sel && styles.rosterPickOn]}
-                            >
-                              <Text style={styles.rosterPickName}>{item.display_name}</Text>
-                            </Pressable>
-                          );
-                        })}
+                    </View>
+                  </Pressable>
+                </View>
+              </ScrollView>
+              <View
+                style={[styles.datePlanFooter, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}
+              >
+                <Button
+                  label="Next"
+                  disabled={!durationChoiceId}
+                  onPress={() => toStep(2)}
+                />
+              </View>
+            </>
+          ) : dateSetupStep === 2 ? (
+            <>
+              <View style={[styles.datePlanHeader, { paddingTop: insets.top + spacing.sm }]}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to select time"
+                  onPress={() => toStep(1)}
+                  style={({ pressed }) => [styles.datePlanHeaderBtn, pressed && styles.pressed]}
+                >
+                  <ChevronLeft color={colors.ink} size={24} strokeWidth={1.75} />
+                </Pressable>
+                <Text style={styles.datePlanNavTitleSans}>Choose companion</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  onPress={onCloseDateModal}
+                  style={({ pressed }) => [styles.datePlanHeaderBtn, pressed && styles.pressed]}
+                >
+                  <X color={colors.ink} size={24} strokeWidth={2} />
+                </Pressable>
+              </View>
+              <DatePlanProgressBar activeStep={2} />
+              <ScrollView
+                style={styles.datePlanScrollView}
+                contentContainerStyle={styles.datePlanScroll}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={styles.datePlanHeadline}>
+                  Who are you <Text style={styles.datePlanHeadlineAccent}>meeting?</Text>
+                </Text>
+                <Text style={styles.datePlanLead}>
+                  Connect with friends nearby and plan meetups effortlessly.
+                </Text>
+                {rosterLoading ? (
+                  <ActivityIndicator style={{ marginVertical: spacing.xl }} color={colors.cta} />
+                ) : roster.length === 0 ? (
+                  <Text style={styles.datePlanEmptyRoster}>
+                    Add someone to your roster first, then you can start date mode.
+                  </Text>
+                ) : (
+                  <View style={styles.companionList}>
+                    {roster.map((item) => {
+                      const sel = selectedRosterId === item.id;
+                      const initials = companionInitials(item.display_name);
+                      const bg = companionAvatarColor(item.id);
+                      return (
                         <Pressable
-                          onPress={() => toStep(3)}
-                          disabled={!selectedRosterId}
+                          key={item.id}
+                          onPress={() => setSelectedRosterId(item.id)}
                           style={({ pressed }) => [
-                            styles.startBtn,
+                            styles.companionRow,
+                            sel && styles.companionRowSelected,
                             pressed && styles.pressed,
-                            !selectedRosterId && styles.disabledBtn,
                           ]}
                         >
-                          <Text style={styles.startBtnText}>Next</Text>
+                          <View style={[styles.companionAvatar, { backgroundColor: bg }]}>
+                            <Text style={styles.companionAvatarText}>{initials}</Text>
+                          </View>
+                          <Text style={styles.companionName} numberOfLines={1}>
+                            {item.display_name}
+                          </Text>
                         </Pressable>
-                      </>
-                    )}
-                  </>
-                ) : null}
-
-                {dateSetupStep === 3 ? (
-                  <>
-                    <Text style={styles.stepLead}>All set. One tap and your circle can follow up.</Text>
-                    <View style={styles.reviewCard}>
-                      <Text style={styles.reviewRow}>
-                        Duration: <Text style={styles.reviewStrong}>{selectedDurationLabel}</Text>
-                      </Text>
-                      <Text style={styles.reviewRow}>
-                        With:{' '}
-                        <Text style={styles.reviewStrong}>
-                          {selectedCompanion?.display_name ?? 'No one selected'}
-                        </Text>
-                      </Text>
-                    </View>
-                    <Pressable
-                      onPress={onStartDate}
-                      disabled={dateActionLoading || !selectedRosterId}
-                      style={({ pressed }) => [
-                        styles.startBtn,
-                        styles.finalStartBtn,
-                        pressed && styles.pressed,
-                        (!selectedRosterId || dateActionLoading) && styles.disabledBtn,
-                      ]}
-                    >
-                      {dateActionLoading ? (
-                        <ActivityIndicator color={colors.onPrimary} />
-                      ) : (
-                        <Text style={styles.startBtnText}>Start date</Text>
-                      )}
-                    </Pressable>
-                  </>
-                ) : null}
-              </>
-            )}
-          </ScrollView>
+                      );
+                    })}
+                  </View>
+                )}
+              </ScrollView>
+              <View
+                style={[styles.datePlanFooter, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}
+              >
+                <Button
+                  label="Next"
+                  disabled={!selectedRosterId}
+                  onPress={() => toStep(3)}
+                />
+              </View>
+            </>
+          ) : dateSetupStep === 3 ? (
+            <>
+              <View style={[styles.datePlanHeader, { paddingTop: insets.top + spacing.sm }]}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to choose companion"
+                  onPress={() => toStep(2)}
+                  style={({ pressed }) => [styles.datePlanHeaderBtn, pressed && styles.pressed]}
+                >
+                  <ChevronLeft color={colors.ink} size={24} strokeWidth={1.75} />
+                </Pressable>
+                <Text style={styles.datePlanNavTitle}>Ready to start</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  onPress={onCloseDateModal}
+                  style={({ pressed }) => [styles.datePlanHeaderBtn, pressed && styles.pressed]}
+                >
+                  <X color={colors.ink} size={24} strokeWidth={2} />
+                </Pressable>
+              </View>
+              <DatePlanProgressBar activeStep={3} />
+              <ScrollView
+                style={styles.datePlanScrollView}
+                contentContainerStyle={styles.datePlanScroll}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <Text style={[styles.datePlanHeadline, { marginBottom: spacing.lg }]}>
+                  All set. One tap and your circle can{' '}
+                  <Text style={styles.datePlanHeadlineAccent}>follow up.</Text>
+                </Text>
+                <View style={styles.readyReviewCard}>
+                  <View
+                    style={[
+                      styles.readyReviewAvatar,
+                      {
+                        backgroundColor: companionAvatarColor(
+                          selectedRosterId ?? selectedCompanion?.id ?? '',
+                        ),
+                      },
+                    ]}
+                  >
+                    <Text style={styles.readyReviewAvatarText}>
+                      {companionInitials(selectedCompanion?.display_name ?? '')}
+                    </Text>
+                  </View>
+                  <View style={styles.readyReviewTextCol}>
+                    <Text style={styles.readyReviewName} numberOfLines={2}>
+                      {selectedCompanion?.display_name ?? 'No one selected'}
+                    </Text>
+                    <Text style={styles.readyReviewDuration}>
+                      Duration: {reviewDurationFriendly}
+                    </Text>
+                  </View>
+                </View>
+              </ScrollView>
+              <View
+                style={[styles.datePlanFooter, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}
+              >
+                <Button
+                  label="Start date"
+                  loading={dateActionLoading}
+                  disabled={!selectedRosterId || dateActionLoading}
+                  onPress={() => {
+                    void onStartDate();
+                  }}
+                />
+              </View>
+            </>
+          ) : null}
           {customPickerOpen ? (
             <View style={styles.customLayer} pointerEvents="box-none">
               <Pressable style={styles.customBackdrop} onPress={() => setCustomPickerOpen(false)} />
               <View style={styles.customSheet}>
-                <Text style={styles.customTitle}>Custom duration</Text>
-                <Text style={styles.customSub}>Spin hours and minutes, center row is selected.</Text>
+                <View style={styles.customSheetHeaderRow}>
+                  <Text style={styles.customTitle}>Custom duration</Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Close"
+                    hitSlop={12}
+                    onPress={() => setCustomPickerOpen(false)}
+                    style={({ pressed }) => [styles.customCloseBtn, pressed && styles.pressed]}
+                  >
+                    <X color={colors.ink} size={22} strokeWidth={2} />
+                  </Pressable>
+                </View>
                 <View style={styles.wheelsWrap}>
                   <View style={styles.wheelColumn}>
-                    <Text style={styles.wheelLabel}>Hours</Text>
                     <View style={styles.wheelViewport}>
                       <FlatList
                         ref={hoursListRef}
@@ -1920,17 +2150,20 @@ export default function MapScreen() {
                         keyExtractor={(h) => `h-${h}`}
                         renderItem={({ item }) => (
                           <View style={styles.wheelRow}>
-                            <Text
-                              style={[styles.wheelRowText, customHours === item && styles.wheelRowTextOn]}
-                            >
-                              {item}
+                            <Text style={styles.wheelRowText}>
+                              {String(item).padStart(2, '0')}
                             </Text>
                           </View>
                         )}
                         snapToInterval={WHEEL_ROW_HEIGHT}
-                        decelerationRate="fast"
+                        snapToAlignment="start"
+                        decelerationRate={WHEEL_DECELERATION_RATE}
+                        bounces
+                        alwaysBounceVertical
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={styles.wheelPad}
+                        scrollEventThrottle={8}
+                        onScroll={onHourWheelScroll}
                         getItemLayout={(_, index) => ({
                           length: WHEEL_ROW_HEIGHT,
                           offset: WHEEL_ROW_HEIGHT * index,
@@ -1940,11 +2173,16 @@ export default function MapScreen() {
                           onWheelEnd(e, CUSTOM_HOUR_MAX, setCustomHours, hoursListRef)
                         }
                       />
-                      <View style={styles.wheelSelectionBand} pointerEvents="none" />
+                      <View style={styles.wheelCenterFrost} pointerEvents="none" />
+                      <View style={styles.wheelCenterRow} pointerEvents="none">
+                        <Text style={styles.wheelCenterNumber}>
+                          {String(customHours).padStart(2, '0')}
+                        </Text>
+                        <Text style={styles.wheelCenterUnit}>HOURS</Text>
+                      </View>
                     </View>
                   </View>
                   <View style={styles.wheelColumn}>
-                    <Text style={styles.wheelLabel}>Minutes</Text>
                     <View style={styles.wheelViewport}>
                       <FlatList
                         ref={minutesListRef}
@@ -1953,20 +2191,20 @@ export default function MapScreen() {
                         keyExtractor={(m) => `m-${m}`}
                         renderItem={({ item }) => (
                           <View style={styles.wheelRow}>
-                            <Text
-                              style={[
-                                styles.wheelRowText,
-                                customMinutes === item && styles.wheelRowTextOn,
-                              ]}
-                            >
+                            <Text style={styles.wheelRowText}>
                               {String(item).padStart(2, '0')}
                             </Text>
                           </View>
                         )}
                         snapToInterval={WHEEL_ROW_HEIGHT}
-                        decelerationRate="fast"
+                        snapToAlignment="start"
+                        decelerationRate={WHEEL_DECELERATION_RATE}
+                        bounces
+                        alwaysBounceVertical
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={styles.wheelPad}
+                        scrollEventThrottle={8}
+                        onScroll={onMinuteWheelScroll}
                         getItemLayout={(_, index) => ({
                           length: WHEEL_ROW_HEIGHT,
                           offset: WHEEL_ROW_HEIGHT * index,
@@ -1976,18 +2214,21 @@ export default function MapScreen() {
                           onWheelEnd(e, CUSTOM_MINUTE_MAX, setCustomMinutes, minutesListRef)
                         }
                       />
-                      <View style={styles.wheelSelectionBand} pointerEvents="none" />
+                      <View style={styles.wheelCenterFrost} pointerEvents="none" />
+                      <View style={styles.wheelCenterRow} pointerEvents="none">
+                        <Text style={styles.wheelCenterNumber}>
+                          {String(customMinutes).padStart(2, '0')}
+                        </Text>
+                        <Text style={styles.wheelCenterUnit}>MIN</Text>
+                      </View>
                     </View>
                   </View>
                 </View>
-                <Text style={styles.customPreview}>Selected: {customDurationLabel}</Text>
-                <View style={styles.customActions}>
-                  <Pressable onPress={() => setCustomPickerOpen(false)} style={styles.customCancelBtn}>
-                    <Text style={styles.customCancelLabel}>Cancel</Text>
-                  </Pressable>
-                  <Pressable onPress={confirmCustomDuration} style={styles.customUseBtn}>
-                    <Text style={styles.customUseLabel}>Use time</Text>
-                  </Pressable>
+                <View style={styles.customFooter}>
+                  <Text style={styles.customPreview}>
+                    Selected: {customDurationPreviewText}
+                  </Text>
+                  <Button label="Use time" onPress={confirmCustomDuration} />
                 </View>
               </View>
             </View>
@@ -2024,45 +2265,43 @@ const styles = StyleSheet.create({
     lineHeight: lineHeight(typeScale.labelSm, 1.4),
     color: colors.onSurface,
   },
-  dateFab: {
+  dateFabHit: {
     position: 'absolute',
     zIndex: 31,
+  },
+  dateFab: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: radii.full,
-    backgroundColor: colors.secondaryContainer,
-    borderWidth: 1,
-    borderColor: 'rgba(201, 196, 213, 0.4)',
     ...Platform.select({
       ios: {
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.12,
-        shadowRadius: 8,
+        shadowColor: 'rgba(31, 74, 56, 0.35)',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 1,
+        shadowRadius: 10,
       },
-      android: { elevation: 4 },
+      android: { elevation: 5 },
       default: {},
     }),
   },
   dateFabActive: {
-    backgroundColor: colors.errorContainer,
-    borderColor: colors.error,
+    opacity: 0.94,
   },
   dateFabLabel: {
     fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelSm,
-    color: colors.onSecondaryContainer,
-  },
-  dateFabLabelActive: {
-    color: colors.onErrorContainer,
+    fontSize: typeScale.labelMd,
+    lineHeight: lineHeight(typeScale.labelMd, 1.2),
+    color: '#FDE8EE',
+    letterSpacing: 0.15,
   },
   dateFabTimer: {
-    fontFamily: fontFamily.bold,
+    fontFamily: fontFamily.semiBold,
     fontSize: typeScale.labelSm,
-    color: colors.onErrorContainer,
+    lineHeight: lineHeight(typeScale.labelSm, 1.2),
+    color: 'rgba(253, 232, 238, 0.92)',
     marginTop: 1,
   },
   sheet: {
@@ -2077,7 +2316,7 @@ const styles = StyleSheet.create({
   },
   sheetTint: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.white,
+    backgroundColor: colors.blush,
     borderWidth: 0,
   },
   /** Match circle list row cards so the profile readout feels like the same “popup”, not a tall white slab. */
@@ -2105,9 +2344,10 @@ const styles = StyleSheet.create({
   sheetTitle: {
     paddingHorizontal: spacing.md,
     paddingBottom: 4,
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelMd,
-    color: colors.onSurface,
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: typeScale.titleLg,
+    lineHeight: lineHeight(typeScale.titleLg, 1.2),
+    color: colors.ink,
   },
   sheetScroll: {
     flex: 1,
@@ -2224,7 +2464,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     padding: 12,
-    backgroundColor: colors.surfaceContainerLowest,
+    backgroundColor: colors.card,
     borderRadius: radii.md,
     ...Platform.select({
       ios: {
@@ -2281,13 +2521,13 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.semiBold,
     fontSize: typeScale.labelMd,
     lineHeight: lineHeight(typeScale.labelMd, 1.43),
-    color: colors.onSurface,
+    color: colors.ink,
   },
   personSub: {
     fontFamily: fontFamily.regular,
     fontSize: 13,
     lineHeight: 18,
-    color: colors.onSurfaceVariant,
+    color: colors.meta,
   },
   pinPress: {
     alignItems: 'center',
@@ -2390,24 +2630,359 @@ const styles = StyleSheet.create({
     lineHeight: lineHeight(typeScale.labelSm, 1.45),
     color: colors.onSurface,
   },
-  dateModalScreen: {
+  datePlanScreen: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.paper,
     paddingHorizontal: containerMargin,
   },
-  dateModalHeader: {
+  datePlanHeader: {
+    zIndex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
-  dateModalTitle: {
+  datePlanHeaderBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: -8,
+  },
+  datePlanHeaderSide: {
+    width: 44,
+    height: 44,
+  },
+  datePlanNavTitle: {
+    fontFamily: fontFamily.display,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.2),
+    color: colors.ink,
+  },
+  datePlanNavTitleSans: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.2),
+    color: colors.ink,
+  },
+  datePlanProgressRow: {
+    zIndex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: spacing.lg,
+  },
+  datePlanProgressSeg: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(122, 103, 112, 0.28)',
+  },
+  datePlanProgressSegActive: {
+    backgroundColor: colors.ink,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  datePlanScrollView: {
+    zIndex: 1,
+    flex: 1,
+  },
+  datePlanScroll: {
+    flexGrow: 1,
+    paddingBottom: spacing.lg,
+  },
+  datePlanHeadline: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: typeScale.headlineLg,
+    lineHeight: lineHeight(typeScale.headlineLg, 1.08),
+    color: colors.ink,
+    letterSpacing: -0.5,
+    marginBottom: spacing.sm,
+  },
+  datePlanHeadlineAccent: {
+    fontFamily: fontFamily.displayItalic,
+    color: colors.cta,
+  },
+  datePlanLead: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.5),
+    color: colors.meta,
+    marginBottom: spacing.lg,
+  },
+  datePlanEmptyRoster: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.45),
+    color: colors.meta,
+    textAlign: 'center',
+    marginTop: spacing.md,
+  },
+  companionList: {
+    gap: spacing.sm,
+  },
+  companionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.card,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    ...Platform.select({
+      ios: {
+        shadowColor: 'rgba(26, 17, 24, 0.06)',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1,
+        shadowRadius: 6,
+      },
+      android: { elevation: 1 },
+      default: {},
+    }),
+  },
+  companionRowSelected: {
+    backgroundColor: colors.primaryFixed,
+    borderColor: 'rgba(168, 53, 90, 0.28)',
+  },
+  companionAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  companionAvatarText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelMd,
+    color: colors.white,
+    letterSpacing: 0.3,
+  },
+  companionName: {
+    flex: 1,
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.35),
+    color: colors.ink,
+  },
+  datePlanDurationList: {
+    gap: spacing.sm,
+  },
+  datePlanDurationCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.card,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    ...Platform.select({
+      ios: {
+        shadowColor: 'rgba(26, 17, 24, 0.08)',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 1,
+        shadowRadius: 8,
+      },
+      android: { elevation: 2 },
+      default: {},
+    }),
+  },
+  datePlanDurationCardOn: {
+    borderColor: colors.cta,
+  },
+  datePlanIconWell: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: colors.primaryFixed,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  datePlanDurationText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  datePlanDurationLabel: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.25),
+    color: colors.ink,
+  },
+  datePlanDurationSub: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelMd,
+    lineHeight: lineHeight(typeScale.labelMd, 1.4),
+    color: colors.meta,
+  },
+  datePlanFooter: {
+    zIndex: 1,
+    paddingTop: spacing.md,
+  },
+  readyReviewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
+    ...Platform.select({
+      ios: {
+        shadowColor: colors.ink,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.07,
+        shadowRadius: 12,
+      },
+      android: { elevation: 2 },
+      default: {},
+    }),
+  },
+  readyReviewAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  readyReviewAvatarText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.titleLg,
+    color: colors.white,
+    letterSpacing: 0.3,
+  },
+  readyReviewTextCol: {
+    flex: 1,
+    gap: 4,
+  },
+  readyReviewName: {
     fontFamily: fontFamily.bold,
-    fontSize: typeScale.headlineMd,
-    color: colors.onSurface,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.35),
+    color: colors.ink,
   },
-  dateModalScroll: {
-    paddingBottom: spacing.xl * 2,
+  readyReviewDuration: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelMd,
+    lineHeight: lineHeight(typeScale.labelMd, 1.35),
+    color: colors.meta,
+  },
+  dateActivePillLabel: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.labelSm,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    color: colors.meta,
+    marginBottom: spacing.sm,
+  },
+  dateActiveCard: {
+    backgroundColor: colors.card,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    ...Platform.select({
+      ios: {
+        shadowColor: colors.ink,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.07,
+        shadowRadius: 12,
+      },
+      android: { elevation: 2 },
+      default: {},
+    }),
+  },
+  dateActiveCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  dateActiveAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dateActiveAvatarText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.titleLg,
+    color: colors.white,
+    letterSpacing: 0.3,
+  },
+  dateActiveCardTopText: {
+    flex: 1,
+    gap: 4,
+  },
+  dateActiveCompanionName: {
+    fontFamily: fontFamily.bold,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.35),
+    color: colors.ink,
+  },
+  dateActiveStarted: {
+    fontFamily: fontFamily.regular,
+    fontSize: typeScale.labelMd,
+    lineHeight: lineHeight(typeScale.labelMd, 1.35),
+    color: colors.meta,
+  },
+  dateActiveTimerBand: {
+    marginTop: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.riskLowBg,
+  },
+  dateActiveTimerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  dateActiveTimerLabel: {
+    fontFamily: fontFamily.medium,
+    fontSize: typeScale.labelMd,
+    lineHeight: lineHeight(typeScale.labelMd, 1.35),
+    color: colors.riskLowInk,
+  },
+  dateActiveTimerValue: {
+    fontFamily: fontFamily.bold,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.2),
+    color: colors.riskLowInk,
+    fontVariant: ['tabular-nums'],
+  },
+  dateActiveSafetyStack: {
+    marginTop: spacing.lg,
+    gap: spacing.md,
+  },
+  dateActiveSafeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: 16,
+    borderRadius: radii.lg,
+    backgroundColor: colors.sageGradientEnd,
+  },
+  dateActiveSafeBtnText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    color: colors.white,
+  },
+  dateActiveAlertBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: 16,
+    borderRadius: radii.lg,
+    backgroundColor: colors.alert,
+  },
+  dateActiveAlertBtnText: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: typeScale.bodyMd,
+    color: colors.white,
   },
   backPill: {
     minWidth: 56,
@@ -2465,23 +3040,6 @@ const styles = StyleSheet.create({
     fontSize: typeScale.labelSm,
     color: colors.onSurfaceVariant,
   },
-  rosterPick: {
-    padding: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    marginBottom: spacing.sm,
-    backgroundColor: colors.surfaceContainerLowest,
-  },
-  rosterPickOn: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primaryContainer,
-  },
-  rosterPickName: {
-    fontFamily: fontFamily.medium,
-    fontSize: typeScale.bodyMd,
-    color: colors.onSurface,
-  },
   timerRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -2524,93 +3082,8 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
     borderRadius: radii.lg,
   },
-  reviewCard: {
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    backgroundColor: colors.surfaceContainerLowest,
-    padding: spacing.md,
-    gap: 8,
-  },
-  reviewRow: {
-    fontFamily: fontFamily.regular,
-    fontSize: typeScale.bodyMd,
-    color: colors.onSurfaceVariant,
-  },
-  reviewStrong: {
-    fontFamily: fontFamily.semiBold,
-    color: colors.onSurface,
-  },
-  endBtn: {
-    marginTop: spacing.lg,
-    backgroundColor: colors.error,
-    paddingVertical: 16,
-    borderRadius: radii.md,
-    alignItems: 'center',
-  },
-  endBtnText: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelMd,
-    color: '#fff',
-  },
   disabledBtn: {
     opacity: 0.5,
-  },
-  activeCard: {
-    padding: spacing.md,
-    borderRadius: radii.md,
-    backgroundColor: colors.secondaryContainer,
-    marginBottom: spacing.md,
-  },
-  activeWith: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.bodyMd,
-    color: colors.onSecondaryContainer,
-  },
-  safetyRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  safeBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.surfaceContainerLowest,
-  },
-  safeBtnText: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelSm,
-    color: colors.primary,
-  },
-  alertBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.error,
-    backgroundColor: colors.errorContainer,
-  },
-  alertBtnText: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelSm,
-    color: colors.onErrorContainer,
-  },
-  timerLineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
   },
   customBackdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -2625,46 +3098,43 @@ const styles = StyleSheet.create({
     position: 'relative',
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.paper,
     paddingHorizontal: containerMargin,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+  },
+  customSheetHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.lg,
     gap: spacing.md,
   },
-  customTitle: {
-    fontFamily: fontFamily.bold,
-    fontSize: typeScale.titleLg,
-    color: colors.onSurface,
-    textAlign: 'center',
+  customCloseBtn: {
+    padding: 4,
   },
-  customSub: {
-    fontFamily: fontFamily.regular,
-    fontSize: typeScale.labelSm,
-    color: colors.onSurfaceVariant,
-    textAlign: 'center',
-    marginTop: -4,
+  customTitle: {
+    flex: 1,
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: typeScale.titleLg,
+    lineHeight: lineHeight(typeScale.titleLg, 1.2),
+    color: colors.ink,
   },
   wheelsWrap: {
     flexDirection: 'row',
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   wheelColumn: {
     flex: 1,
     borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    backgroundColor: colors.surfaceContainerLowest,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.ghostBorder,
+    backgroundColor: colors.card,
     overflow: 'hidden',
-  },
-  wheelLabel: {
-    fontFamily: fontFamily.medium,
-    fontSize: typeScale.labelSm,
-    color: colors.onSurfaceVariant,
-    textAlign: 'center',
-    paddingTop: spacing.sm,
   },
   wheelViewport: {
     position: 'relative',
+    overflow: 'hidden',
   },
   wheelList: {
     height: WHEEL_ROW_HEIGHT * WHEEL_VISIBLE_ROWS,
@@ -2678,62 +3148,57 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   wheelRowText: {
-    fontFamily: fontFamily.medium,
-    fontSize: typeScale.bodyLg,
-    color: colors.onSurfaceVariant,
+    fontFamily: fontFamily.display,
+    fontSize: 17,
+    lineHeight: WHEEL_ROW_HEIGHT,
+    color: colors.meta,
+    opacity: 0.5,
   },
-  wheelRowTextOn: {
-    color: colors.primary,
-  },
-  wheelSelectionBand: {
+  wheelCenterFrost: {
     position: 'absolute',
     left: 0,
     right: 0,
     top: WHEEL_ROW_HEIGHT * Math.floor(WHEEL_VISIBLE_ROWS / 2),
     height: WHEEL_ROW_HEIGHT,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: colors.primaryContainer,
-    backgroundColor: colors.primaryFixed,
-    opacity: 0.22,
+    backgroundColor: colors.card,
+    zIndex: 1,
+  },
+  wheelCenterRow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: WHEEL_ROW_HEIGHT * Math.floor(WHEEL_VISIBLE_ROWS / 2),
+    height: WHEEL_ROW_HEIGHT,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    zIndex: 2,
+  },
+  wheelCenterNumber: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: 34,
+    lineHeight: 38,
+    color: colors.cta,
+    letterSpacing: -0.5,
+  },
+  wheelCenterUnit: {
+    fontFamily: fontFamily.semiBold,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: colors.cta,
+  },
+  customFooter: {
+    marginTop: spacing.xl,
+    paddingTop: spacing.md,
+    gap: spacing.md,
   },
   customPreview: {
-    fontFamily: fontFamily.medium,
-    fontSize: typeScale.labelMd,
-    color: colors.onSurface,
     textAlign: 'center',
-  },
-  customActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  customCancelBtn: {
-    flex: 1,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    backgroundColor: colors.surfaceContainerLowest,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 13,
-  },
-  customCancelLabel: {
-    fontFamily: fontFamily.medium,
+    fontFamily: fontFamily.displayItalic,
     fontSize: typeScale.labelMd,
-    color: colors.onSurfaceVariant,
-  },
-  customUseBtn: {
-    flex: 1,
-    borderRadius: radii.md,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 13,
-  },
-  customUseLabel: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelMd,
-    color: colors.onPrimary,
+    lineHeight: lineHeight(typeScale.labelMd, 1.45),
+    color: colors.cta,
   },
 });
 

@@ -2,89 +2,58 @@ import { Platform, type ViewStyle } from 'react-native';
 
 import { colors } from './colors';
 
-/** Header */
-export const headerShadow: ViewStyle = Platform.select<ViewStyle>({
+/** Primary CTA — rgba(123,37,64,0.32) 16px blur, 6px y-offset */
+export const primaryBtnShadow: ViewStyle = Platform.select<ViewStyle>({
   ios: {
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-  },
-  android: { elevation: 4 },
-  default: {},
-}) ?? {};
-
-/** `.ambient-shadow-card` */
-export const ambientCard: ViewStyle = Platform.select<ViewStyle>({
-  ios: {
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-  },
-  android: { elevation: 3 },
-  default: {},
-}) ?? {};
-
-/** Legacy alias */
-export const cardShadowSoft = ambientCard;
-
-/** Hero icon ring */
-export const heroIconShadow: ViewStyle = Platform.select<ViewStyle>({
-  ios: {
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 20,
-  },
-  android: { elevation: 4 },
-  default: {},
-}) ?? {};
-
-/** `.ambient-shadow-btn` */
-export const ambientBtn: ViewStyle = Platform.select<ViewStyle>({
-  ios: {
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 24,
-  },
-  android: { elevation: 8 },
-  default: {},
-}) ?? {};
-
-/** Primary yellow CTA (legacy) */
-export const ctaYellowShadow: ViewStyle = Platform.select<ViewStyle>({
-  ios: {
-    shadowColor: '#fcd43e',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
+    shadowColor: colors.ctaShadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 1,
+    shadowRadius: 16,
   },
   android: { elevation: 6 },
   default: {},
 }) ?? {};
 
-/** Bottom nav */
-/** Map avatar / pin ring */
+/** @deprecated Use primaryBtnShadow */
+export const ambientBtn = primaryBtnShadow;
+
+export const ambientCard: ViewStyle = Platform.select<ViewStyle>({
+  ios: {
+    shadowColor: 'rgba(26, 17, 24, 0.12)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 16,
+  },
+  android: { elevation: 3 },
+  default: {},
+}) ?? {};
+
+export const cardShadowSoft = ambientCard;
+
+export const headerShadow: ViewStyle = ambientCard;
+
+export const heroIconShadow: ViewStyle = ambientCard;
+
+export const ctaYellowShadow: ViewStyle = ambientCard;
+
 export const pinGlow: ViewStyle = Platform.select<ViewStyle>({
   ios: {
-    shadowColor: colors.primary,
+    shadowColor: colors.ctaGradientStart,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
   },
-  android: { elevation: 8 },
+  android: { elevation: 6 },
   default: {},
 }) ?? {};
 
 export const dockShadowUp: ViewStyle = Platform.select<ViewStyle>({
   ios: {
-    shadowColor: colors.primaryContainer,
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.14,
-    shadowRadius: 30,
+    shadowColor: 'rgba(26, 17, 24, 0.08)',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 1,
+    shadowRadius: 12,
   },
-  android: { elevation: 10 },
+  android: { elevation: 8 },
   default: {},
 }) ?? {};

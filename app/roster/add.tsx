@@ -12,10 +12,14 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Button } from '../../components/ui/Button';
+import { ScreenGradient } from '../../components/ui/ScreenGradient';
 import { createRosterPerson } from '../../lib/roster';
 import { useAuth } from '../../providers/AuthProvider';
 import {
+  ambientCard,
   colors,
   containerMargin,
   fontFamily,
@@ -66,120 +70,123 @@ export default function AddRosterPersonScreen() {
 
   return (
     <View style={styles.screen}>
+      <StatusBar style="dark" />
+      <ScreenGradient />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
       >
         <ScrollView
           keyboardShouldPersistTaps="handled"
+          style={styles.scroll}
           contentContainerStyle={[
             styles.content,
             {
-              paddingTop: insets.top + spacing.md,
-              paddingBottom: spacing.xl,
+              paddingTop: insets.top + spacing.sm,
+              paddingBottom: spacing.xl * 2,
               paddingHorizontal: containerMargin,
             },
           ]}
+          showsVerticalScrollIndicator={false}
         >
-          <Pressable
-            onPress={() => {
-              router.back();
-            }}
-            style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
-          >
-            <ChevronLeft size={18} color={colors.onSurface} strokeWidth={2.4} />
-            <Text style={styles.backLabel}>Back</Text>
-          </Pressable>
+          <View style={styles.topBar}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+              onPress={() => {
+                router.back();
+              }}
+              style={({ pressed }) => [styles.backIconBtn, pressed && styles.pressed]}
+            >
+              <ChevronLeft size={24} color={colors.ink} strokeWidth={1.75} />
+            </Pressable>
+          </View>
 
           <View style={styles.header}>
-            <Text style={styles.title}>Add Person</Text>
-            <Text style={styles.subtitle}>
-              Create a private roster profile manually.
-            </Text>
+            <Text style={styles.title}>Add person</Text>
+            <Text style={styles.subtitle}>Create a private roster profile manually.</Text>
           </View>
 
-          <View style={styles.form}>
-            <Field label="Display name *">
-              <TextInput
-                value={displayName}
-                onChangeText={setDisplayName}
-                placeholder="e.g. Alex Mercer"
-                placeholderTextColor={colors.outline}
-                style={styles.input}
-              />
-            </Field>
-            <Field label="Estimated age">
-              <TextInput
-                value={estimatedAge}
-                onChangeText={setEstimatedAge}
-                placeholder="e.g. 31"
-                placeholderTextColor={colors.outline}
-                keyboardType="number-pad"
-                style={styles.input}
-              />
-            </Field>
-            <Field label="Date of birth (YYYY-MM-DD)">
-              <TextInput
-                value={dob}
-                onChangeText={setDob}
-                placeholder="1995-05-14"
-                placeholderTextColor={colors.outline}
-                style={styles.input}
-              />
-            </Field>
-            <View style={styles.inline}>
-              <View style={styles.inlineCell}>
-                <Field label="State">
-                  <TextInput
-                    value={stateValue}
-                    onChangeText={setStateValue}
-                    placeholder="WA"
-                    placeholderTextColor={colors.outline}
-                    autoCapitalize="characters"
-                    maxLength={2}
-                    style={styles.input}
-                  />
-                </Field>
+          <View style={[styles.formCard, ambientCard]}>
+            <Text style={styles.cardTitle}>Details</Text>
+            <View style={styles.form}>
+              <Field label="Display name *">
+                <TextInput
+                  value={displayName}
+                  onChangeText={setDisplayName}
+                  placeholder="e.g. Alex Mercer"
+                  placeholderTextColor={colors.meta}
+                  style={styles.input}
+                />
+              </Field>
+              <Field label="Estimated age">
+                <TextInput
+                  value={estimatedAge}
+                  onChangeText={setEstimatedAge}
+                  placeholder="e.g. 31"
+                  placeholderTextColor={colors.meta}
+                  keyboardType="number-pad"
+                  style={styles.input}
+                />
+              </Field>
+              <Field label="Date of birth (YYYY-MM-DD)">
+                <TextInput
+                  value={dob}
+                  onChangeText={setDob}
+                  placeholder="1995-05-14"
+                  placeholderTextColor={colors.meta}
+                  style={styles.input}
+                />
+              </Field>
+              <View style={styles.inline}>
+                <View style={styles.inlineCell}>
+                  <Field label="State">
+                    <TextInput
+                      value={stateValue}
+                      onChangeText={setStateValue}
+                      placeholder="WA"
+                      placeholderTextColor={colors.meta}
+                      autoCapitalize="characters"
+                      maxLength={2}
+                      style={styles.input}
+                    />
+                  </Field>
+                </View>
+                <View style={styles.inlineCell}>
+                  <Field label="ZIP">
+                    <TextInput
+                      value={zip}
+                      onChangeText={setZip}
+                      placeholder="98101"
+                      placeholderTextColor={colors.meta}
+                      keyboardType="number-pad"
+                      style={styles.input}
+                    />
+                  </Field>
+                </View>
               </View>
-              <View style={styles.inlineCell}>
-                <Field label="ZIP">
-                  <TextInput
-                    value={zip}
-                    onChangeText={setZip}
-                    placeholder="98101"
-                    placeholderTextColor={colors.outline}
-                    keyboardType="number-pad"
-                    style={styles.input}
-                  />
-                </Field>
-              </View>
+              <Field label="Notes">
+                <TextInput
+                  value={notes}
+                  onChangeText={setNotes}
+                  placeholder="Anything useful to remember…"
+                  placeholderTextColor={colors.meta}
+                  multiline
+                  textAlignVertical="top"
+                  style={[styles.input, styles.notesInput]}
+                />
+              </Field>
             </View>
-            <Field label="Notes">
-              <TextInput
-                value={notes}
-                onChangeText={setNotes}
-                placeholder="Anything useful to remember..."
-                placeholderTextColor={colors.outline}
-                multiline
-                textAlignVertical="top"
-                style={[styles.input, styles.notesInput]}
-              />
-            </Field>
           </View>
 
-          <Pressable
+          <Button
+            label="Save person"
+            loading={saving}
             disabled={!isValid || saving}
             onPress={() => {
               void onSave();
             }}
-            style={({ pressed }) => [
-              styles.saveBtn,
-              (!isValid || saving) && styles.saveBtnDisabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.saveLabel}>{saving ? 'Saving...' : 'Save Person'}</Text>
-          </Pressable>
+          />
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -198,69 +205,84 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.paper,
   },
   flex: {
     flex: 1,
   },
-  content: {
-    gap: spacing.md,
+  scroll: {
+    flex: 1,
+    zIndex: 1,
   },
-  backBtn: {
+  content: {
+    gap: spacing.lg,
+  },
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 2,
-    borderRadius: radii.full,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    backgroundColor: colors.surfaceContainerLowest,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
+    marginBottom: spacing.xs,
   },
-  backLabel: {
-    fontFamily: fontFamily.medium,
-    fontSize: typeScale.labelMd,
-    color: colors.onSurface,
+  backIconBtn: {
+    width: 44,
+    height: 44,
+    marginLeft: -10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   header: {
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   title: {
-    fontFamily: fontFamily.bold,
-    fontSize: typeScale.headlineMd,
-    color: colors.primary,
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: typeScale.headlineLg,
+    lineHeight: lineHeight(typeScale.headlineLg, 1.12),
+    color: colors.ink,
+    letterSpacing: -0.4,
   },
   subtitle: {
     fontFamily: fontFamily.regular,
-    fontSize: typeScale.labelMd,
-    lineHeight: lineHeight(typeScale.labelMd, 1.45),
-    color: colors.onSurfaceVariant,
+    fontSize: typeScale.bodyMd,
+    lineHeight: lineHeight(typeScale.bodyMd, 1.45),
+    color: colors.meta,
+  },
+  formCard: {
+    borderRadius: radii.lg,
+    backgroundColor: colors.card,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  cardTitle: {
+    fontFamily: fontFamily.displaySemiBold,
+    fontSize: typeScale.titleLg,
+    color: colors.ink,
+    letterSpacing: -0.2,
   },
   form: {
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   field: {
     gap: 6,
   },
   label: {
     fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.labelMd,
-    color: colors.onSurfaceVariant,
+    fontSize: typeScale.labelSm,
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
+    color: colors.meta,
   },
   input: {
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
-    backgroundColor: colors.surfaceContainerLowest,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
+    backgroundColor: colors.paper,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontFamily: fontFamily.regular,
     fontSize: typeScale.bodyMd,
-    color: colors.onSurface,
+    color: colors.ink,
   },
   notesInput: {
-    minHeight: 116,
+    minHeight: 120,
   },
   inline: {
     flexDirection: 'row',
@@ -268,21 +290,6 @@ const styles = StyleSheet.create({
   },
   inlineCell: {
     flex: 1,
-  },
-  saveBtn: {
-    marginTop: spacing.sm,
-    borderRadius: radii.full,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    paddingVertical: 13,
-  },
-  saveBtnDisabled: {
-    opacity: 0.5,
-  },
-  saveLabel: {
-    fontFamily: fontFamily.semiBold,
-    fontSize: typeScale.bodyLg,
-    color: colors.onPrimary,
   },
   pressed: {
     opacity: 0.88,

@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScreenGradient } from '../ui/ScreenGradient';
 import { colors, containerMargin, spacing } from '../../theme';
 import { OnboardingProgressDots } from './OnboardingProgressDots';
 
@@ -21,6 +22,7 @@ export function OnboardingScreen({ children, step = 1, showProgress = true, noSc
 
   return (
     <SafeAreaView style={styles.safe}>
+      <ScreenGradient />
       {noScroll ? (
         content
       ) : (
@@ -33,13 +35,13 @@ export function OnboardingScreen({ children, step = 1, showProgress = true, noSc
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.surface },
+  safe: { flex: 1, backgroundColor: colors.paper },
   scroll: { flexGrow: 1 },
   inner: {
     flex: 1,
+    zIndex: 1,
     paddingHorizontal: containerMargin,
     paddingTop: spacing.xl,
     paddingBottom: spacing.lg,
-    backgroundColor: colors.surface,
   },
 });

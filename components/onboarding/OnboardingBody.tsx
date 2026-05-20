@@ -8,7 +8,7 @@ export function OnboardingBody({ children, size = 15 }: { children: ReactNode; s
 
 const styles = StyleSheet.create({
   body: {
-    color: colors.tertiary,
+    color: colors.inkBody,
     fontFamily: fontFamily.regular,
   },
 });
